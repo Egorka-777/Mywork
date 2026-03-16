@@ -9,6 +9,7 @@ import httpx
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
 from telethon import TelegramClient, events
+from telethon.sessions import StringSession
 
 load_dotenv()
 
@@ -24,6 +25,7 @@ TELEGRAM_API_HASH = os.environ["TELEGRAM_API_HASH"]
 OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 TARGET_CHAT_ID = os.environ["TARGET_CHAT_ID"]
+TELETHON_SESSION_STRING = os.environ.get("TELETHON_SESSION_STRING", "")
 SOURCE_CHANNELS_RAW = os.environ.get(
     "SOURCE_CHANNELS",
     "@kirillbezikov,@ungurenko_adout_digital,@artamonov_proreels,@blogoputiteyhana,@mirneyrosetey",
@@ -133,7 +135,6 @@ async def send_via_bot(channel_name: str, rewritten: str) -> None:
                 json={
                     "chat_id": TARGET_CHAT_ID,
                     "text": text,
-                    "parse_mode": "HTML",
                 },
             )
             data = resp.json()
@@ -194,14 +195,38 @@ async def bootstrap(client: TelegramClient, state: dict) -> dict:
     return state
 
 
+async def generate_session_string() -> None:
+    """Run this once locally to generate a session string for headless deployment."""
+    print("=== Generating Telethon session string ===")
+    print("You will be asked for your phone number and the code Telegram sends you.")
+    print()
+    client = TelegramClient(StringSession(), TELEGRAM_API_ID, TELEGRAM_API_HASH)
+    await client.start()
+    session_string = client.session.save()
+    await client.disconnect()
+    print()
+    print("=== SESSION STRING (add this as TELETHON_SESSION_STRING secret) ===")
+    print(session_string)
+    print("=" * 60)
+
+
 async def main() -> None:
+    if not TELETHON_SESSION_STRING:
+        log.error(
+            "TELETHON_SESSION_STRING is not set!\n"
+            "You need to generate it once by running:\n"
+            "  python telegram_rewrite_bot.py --generate-session\n"
+            "Then add the output as the TELETHON_SESSION_STRING secret."
+        )
+        sys.exit(1)
+
     log.info("Starting Telegram Rewriter Bot...")
     log.info(f"Source channels: {SOURCE_CHANNELS}")
     log.info(f"Target chat ID: {TARGET_CHAT_ID}")
 
     state = load_state()
 
-    client = TelegramClient(SESSION_FILE, TELEGRAM_API_ID, TELEGRAM_API_HASH)
+    client = TelegramClient(StringSession(TELETHON_SESSION_STRING), TELEGRAM_API_ID, TELEGRAM_API_HASH)
     await client.start()
     log.info("Telegram personal account connected.")
 
@@ -238,7 +263,10 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        log.info("Stopped by user.")
+    if "--generate-session" in sys.argv:
+        asyncio.run(generate_session_string())
+    else:
+        try:
+            asyncio.run(main())
+        except KeyboardInterrupt:
+            log.info("Stopped by user.")
