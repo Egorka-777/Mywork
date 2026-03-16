@@ -5,10 +5,10 @@ import os
 import sys
 from pathlib import Path
 
+import httpx
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
 from telethon import TelegramClient, events
-from telethon.tl.types import MessageMediaPhoto, MessageMediaDocument
 
 load_dotenv()
 
@@ -22,8 +22,12 @@ log = logging.getLogger(__name__)
 TELEGRAM_API_ID = int(os.environ["TELEGRAM_API_ID"])
 TELEGRAM_API_HASH = os.environ["TELEGRAM_API_HASH"]
 OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
-SOURCE_CHANNELS_RAW = os.environ["SOURCE_CHANNELS"]
-TARGET_CHANNEL = os.environ["TARGET_CHANNEL"]
+BOT_TOKEN = os.environ["BOT_TOKEN"]
+TARGET_CHAT_ID = os.environ["TARGET_CHAT_ID"]
+SOURCE_CHANNELS_RAW = os.environ.get(
+    "SOURCE_CHANNELS",
+    "@kirillbezikov,@ungurenko_adout_digital,@artamonov_proreels,@blogoputiteyhana,@mirneyrosetey",
+)
 USER_STYLE = os.environ.get("USER_STYLE", "")
 
 SOURCE_CHANNELS = [ch.strip() for ch in SOURCE_CHANNELS_RAW.split(",") if ch.strip()]
@@ -31,6 +35,8 @@ SOURCE_CHANNELS = [ch.strip() for ch in SOURCE_CHANNELS_RAW.split(",") if ch.str
 STATE_FILE = Path("state.json")
 SESSION_FILE = "telethon_session"
 MIN_POST_LENGTH = 100
+
+BOT_API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
 openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 
@@ -61,12 +67,22 @@ def mark_bootstrap_done(state: dict) -> dict:
 
 
 async def rewrite_post(original_text: str, channel_title: str) -> str | None:
+    style_block = USER_STYLE if USER_STYLE else (
+        "Маркетолог-практик 10+ лет. Спокойный. Короткий. По-человечески. Без пафоса. "
+        "Без инфо-шума. Без умничанья. Простой понятный язык. Текст должен ощущаться живым. "
+        "Каждая фраза должна цеплять и тянуть читать дальше. Каждое предложение должно работать как крючок. "
+        "Текст должен быть плотным, интересным, затягивающим. Допустим лёгкий сторителлинг, если это усиливает пост. "
+        "Тон наблюдательный, местами слегка ироничный. Ощущение, что пишет человек, который реально понимает, "
+        "как устроены интернет, маркетинг, внимание, продажи и поведение людей. Без канцелярита. "
+        "Без сухой экспертности. Без шаблонной мотивации. Без слишком вылизанного нейросеточного стиля."
+    )
+
     system_prompt = f"""Ты опытный редактор и копирайтер.
 
 Твоя задача — переписать пост из Telegram под стиль автора.
 
 Стиль автора:
-{USER_STYLE if USER_STYLE else "Маркетолог-практик 10+ лет. Спокойный. Короткий. По-человечески. Без пафоса. Без инфо-шума. Без умничанья. Простой понятный язык. Текст должен ощущаться живым. Каждая фраза должна цеплять и тянуть читать дальше. Каждое предложение должно работать как крючок. Текст должен быть плотным, интересным, затягивающим. Допустим лёгкий сторителлинг, если это усиливает пост. Тон наблюдательный, местами слегка ироничный. Ощущение, что пишет человек, который реально понимает, как устроены интернет, маркетинг, внимание, продажи и поведение людей. Без канцелярита. Без сухой экспертности. Без шаблонной мотивации. Без слишком вылизанного нейросеточного стиля."}
+{style_block}
 
 Правила переписывания:
 - Сохраняй смысл, идею и общую механику оригинального поста.
@@ -108,16 +124,28 @@ async def rewrite_post(original_text: str, channel_title: str) -> str | None:
         return None
 
 
-async def send_to_target(client: TelegramClient, channel_name: str, rewritten: str) -> None:
-    message = f"Источник: {channel_name}\n\n{rewritten}"
+async def send_via_bot(channel_name: str, rewritten: str) -> None:
+    text = f"Источник: {channel_name}\n\n{rewritten}"
     try:
-        await client.send_message(TARGET_CHANNEL, message)
-        log.info(f"Sent rewritten post from {channel_name} to {TARGET_CHANNEL}")
+        async with httpx.AsyncClient(timeout=30) as http:
+            resp = await http.post(
+                f"{BOT_API_URL}/sendMessage",
+                json={
+                    "chat_id": TARGET_CHAT_ID,
+                    "text": text,
+                    "parse_mode": "HTML",
+                },
+            )
+            data = resp.json()
+            if not data.get("ok"):
+                log.error(f"Bot API error: {data}")
+            else:
+                log.info(f"Sent rewritten post from {channel_name} to chat {TARGET_CHAT_ID}")
     except Exception as e:
-        log.error(f"Failed to send message to {TARGET_CHANNEL}: {e}")
+        log.error(f"Failed to send via bot API: {e}")
 
 
-async def process_message(client: TelegramClient, state: dict, channel_username: str, message) -> None:
+async def process_message(state: dict, channel_username: str, message) -> None:
     msg_id = message.id
     text = message.text or message.message or ""
 
@@ -139,7 +167,7 @@ async def process_message(client: TelegramClient, state: dict, channel_username:
         log.warning(f"[{channel_username}] Rewrite returned nothing for message {msg_id}")
         return
 
-    await send_to_target(client, channel_username, rewritten)
+    await send_via_bot(channel_username, rewritten)
 
     state[channel_key] = max(state.get(channel_key, 0), msg_id)
     save_state(state)
@@ -169,13 +197,13 @@ async def bootstrap(client: TelegramClient, state: dict) -> dict:
 async def main() -> None:
     log.info("Starting Telegram Rewriter Bot...")
     log.info(f"Source channels: {SOURCE_CHANNELS}")
-    log.info(f"Target channel: {TARGET_CHANNEL}")
+    log.info(f"Target chat ID: {TARGET_CHAT_ID}")
 
     state = load_state()
 
     client = TelegramClient(SESSION_FILE, TELEGRAM_API_ID, TELEGRAM_API_HASH)
     await client.start()
-    log.info("Telegram client connected.")
+    log.info("Telegram personal account connected.")
 
     if not is_bootstrap_done(state):
         state = await bootstrap(client, state)
@@ -201,7 +229,7 @@ async def main() -> None:
             if msg_id <= last_id:
                 return
 
-            await process_message(client, state, channel_id, event.message)
+            await process_message(state, channel_id, event.message)
         except Exception as e:
             log.error(f"Error in message handler: {e}", exc_info=True)
 
