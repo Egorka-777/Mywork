@@ -37,6 +37,7 @@ SOURCE_CHANNELS = [ch.strip() for ch in SOURCE_CHANNELS_RAW.split(",") if ch.str
 STATE_FILE = Path("state.json")
 MIN_POST_LENGTH = 100
 POLL_INTERVAL = 60  # seconds between checks
+INITIAL_POSTS_PER_CHANNEL = 3  # how many recent posts to send on first launch
 
 BOT_API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
@@ -182,21 +183,42 @@ async def check_channel(client: TelegramClient, state: dict, channel: str) -> No
 
 
 async def bootstrap(client: TelegramClient, state: dict) -> dict:
-    log.info("Bootstrap: recording latest message IDs (existing posts will be skipped)...")
+    log.info(f"Bootstrap: sending last {INITIAL_POSTS_PER_CHANNEL} posts from each channel...")
     for channel in SOURCE_CHANNELS:
         try:
             channel_key = channel.lstrip("@").lower()
-            messages = await client.get_messages(channel, limit=1)
-            if messages:
-                state[channel_key] = messages[0].id
-                log.info(f"  {channel}: last id = {messages[0].id}")
-            else:
+            messages = await client.get_messages(channel, limit=INITIAL_POSTS_PER_CHANNEL)
+            if not messages:
                 state[channel_key] = 0
+                continue
+
+            # Process oldest first
+            to_process = sorted(messages, key=lambda m: m.id)
+
+            for message in to_process:
+                text = message.text or message.message or ""
+                if not text or len(text.strip()) < MIN_POST_LENGTH:
+                    log.info(f"[{channel}] Skipping initial msg {message.id}: too short")
+                    state[channel_key] = max(state.get(channel_key, 0), message.id)
+                    continue
+
+                log.info(f"[{channel}] Sending initial post {message.id} ({len(text)} chars)...")
+                rewritten = await rewrite_post(text, channel)
+                if rewritten:
+                    await send_via_bot(channel, rewritten)
+                else:
+                    log.warning(f"[{channel}] Rewrite failed for initial post {message.id}")
+
+                state[channel_key] = max(state.get(channel_key, 0), message.id)
+                save_state(state)
+                await asyncio.sleep(3)
+
         except Exception as e:
             log.error(f"  {channel}: bootstrap error: {e}")
+
     state = mark_bootstrap_done(state)
     save_state(state)
-    log.info("Bootstrap done. Only new posts will be processed from now on.")
+    log.info("Bootstrap done. Now monitoring for new posts...")
     return state
 
 
