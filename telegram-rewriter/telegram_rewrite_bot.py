@@ -7,7 +7,7 @@ from pathlib import Path
 
 import httpx
 from dotenv import load_dotenv
-from openai import AsyncOpenAI, OpenAI
+from openai import AsyncOpenAI
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 
@@ -22,7 +22,7 @@ log = logging.getLogger(__name__)
 
 TELEGRAM_API_ID = int(os.environ["TELEGRAM_API_ID"])
 TELEGRAM_API_HASH = os.environ["TELEGRAM_API_HASH"]
-OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
+GROQ_API_KEY = os.environ["GROQ_API_KEY"]
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 TARGET_CHAT_ID = os.environ["TARGET_CHAT_ID"]
 TELETHON_SESSION_STRING = os.environ.get("TELETHON_SESSION_STRING", "")
@@ -41,7 +41,10 @@ INITIAL_POSTS_PER_CHANNEL = 3  # how many recent posts to send on first launch
 
 BOT_API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
-openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+openai_client = AsyncOpenAI(
+    api_key=GROQ_API_KEY,
+    base_url="https://api.groq.com/openai/v1",
+)
 
 
 def load_state() -> dict:
@@ -110,7 +113,7 @@ async def rewrite_post(original_text: str, channel_title: str) -> str | None:
 
     try:
         response = await openai_client.chat.completions.create(
-            model="gpt-4o",
+            model="llama-3.3-70b-versatile",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
