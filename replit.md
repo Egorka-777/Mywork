@@ -94,3 +94,15 @@ Generated React Query hooks and fetch client from the OpenAPI spec (e.g. `useHea
 ### `scripts` (`@workspace/scripts`)
 
 Utility scripts package. Each script is a `.ts` file in `src/` with a corresponding npm script in `package.json`. Run scripts via `pnpm --filter @workspace/scripts run <script>`. Scripts can import any workspace package (e.g., `@workspace/db`) by adding it as a dependency in `scripts/package.json`.
+
+## Telegram Rewriter Bot (`telegram-rewriter/`)
+
+A standalone Python background worker (not part of the pnpm monorepo). Monitors Telegram channels via a personal account (Telethon), rewrites posts using OpenAI GPT-4o, and forwards results to a private draft channel.
+
+- Entry: `telegram_rewrite_bot.py`
+- Dependencies: `telethon`, `openai`, `python-dotenv` (see `requirements.txt`)
+- Deploy command (Railway): defined in `Procfile` as `worker: python telegram_rewrite_bot.py`
+- State: `state.json` tracks last processed message ID per channel; `telethon_session.session` stores auth
+- Bootstrap: on first run, records latest message IDs and skips old posts; only new posts are processed from the second run onward
+- Required env vars: `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `OPENAI_API_KEY`, `SOURCE_CHANNELS`, `TARGET_CHANNEL`, `USER_STYLE` (optional)
+- See `telegram-rewriter/.env.example` and `telegram-rewriter/README.md` for full setup instructions
