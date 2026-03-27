@@ -9,7 +9,12 @@ import httpx
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
 from telethon import TelegramClient
+from telethon.extensions import html as tl_html
 from telethon.sessions import StringSession
+from telethon.tl.types import (
+    MessageMediaDocument,
+    MessageMediaPhoto,
+)
 
 load_dotenv()
 
@@ -33,14 +38,14 @@ SOURCE_CHANNELS_RAW = os.environ.get(
     "@Evdo_kimova,@sadekovsasha,@saveliylenivin,@anjela_p,@reelsarkazi,@big_bad_coach,"
     "@maksim_and_ai,@belyakAi",
 )
-USER_STYLE = os.environ.get("USER_STYLE", "")
 
 SOURCE_CHANNELS = [ch.strip() for ch in SOURCE_CHANNELS_RAW.split(",") if ch.strip()]
 
 STATE_FILE = Path("state.json")
 MIN_POST_LENGTH = 100
-POLL_INTERVAL = 60  # seconds between checks
-INITIAL_POSTS_PER_CHANNEL = 3  # how many recent posts to send on first launch
+POLL_INTERVAL = 60
+INITIAL_POSTS_PER_CHANNEL = 3
+MAX_MEDIA_BYTES = 50 * 1024 * 1024  # 50 MB — Bot API upload limit
 
 BOT_API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
@@ -75,7 +80,17 @@ def mark_bootstrap_done(state: dict) -> dict:
     return state
 
 
-async def rewrite_post(original_text: str, channel_title: str) -> str | None:
+def message_to_html(message) -> str:
+    """Convert Telethon message text + entities to Telegram HTML."""
+    raw = message.message or ""
+    entities = message.entities or []
+    try:
+        return tl_html.unparse(raw, entities)
+    except Exception:
+        return raw
+
+
+async def rewrite_post(html_text: str, channel_title: str) -> str | None:
     system_prompt = """Ты — профессиональный редактор Telegram-каналов.
 
 Твоя задача — взять исходный пост и переписать его так, чтобы он читался легче, быстрее и интереснее, чем оригинал.
@@ -128,15 +143,29 @@ async def rewrite_post(original_text: str, channel_title: str) -> str | None:
 — без инфоцыганских формулировок
 — без канцелярита
 
+Форматирование — ОБЯЗАТЕЛЬНО:
+
+Входной текст может содержать HTML-теги Telegram: <b>, <i>, <u>, <s>, <code>, <pre>, <a href>, <tg-spoiler>.
+Также в тексте могут быть эмодзи.
+
+Ты ОБЯЗАН в переписанном посте использовать аналогичные элементы оформления:
+— Если в оригинале есть <b>жирный</b> — используй жирный для ключевых мыслей.
+— Если в оригинале есть <i>курсив</i> — используй курсив для акцентов или цитат.
+— Если в оригинале есть <tg-spoiler>спойлер</tg-spoiler> — используй спойлеры там, где это усиливает интригу.
+— Если в оригинале есть эмодзи — используй эмодзи в похожем количестве и в похожих местах.
+— Сохраняй визуальный ритм оформления: если оригинал структурирован списком с эмодзи, делай так же.
+
 Формат ответа:
 
-— только готовый переписанный пост
+— только готовый переписанный пост в HTML-разметке Telegram
+— используй только допустимые теги: <b>, <i>, <u>, <s>, <code>, <pre>, <a href="...">, <tg-spoiler>
 — без пояснений
 — без комментариев
-— без кавычек
-— без фразы "вот переписанный текст\""""
+— без обрамляющих кавычек
+— без фразы "вот переписанный текст"
+— не оборачивай всё в один тег"""
 
-    user_prompt = f"Перепиши этот пост:\n\n{original_text}"
+    user_prompt = f"Перепиши этот пост:\n\n{html_text}"
 
     try:
         response = await openai_client.chat.completions.create(
@@ -157,21 +186,163 @@ async def rewrite_post(original_text: str, channel_title: str) -> str | None:
         return None
 
 
-async def send_via_bot(channel_name: str, rewritten: str) -> None:
-    text = f"Источник: {channel_name}\n\n{rewritten}"
+async def get_media_info(client: TelegramClient, message) -> tuple:
+    """
+    Returns (media_bytes, media_type, filename) or (None, None, None).
+    media_type is one of: 'photo', 'video', 'animation', 'document'
+    """
+    if not message.media:
+        return None, None, None
+
+    try:
+        if isinstance(message.media, MessageMediaPhoto):
+            media_bytes = await client.download_media(message, file=bytes)
+            return media_bytes, "photo", "photo.jpg"
+
+        if isinstance(message.media, MessageMediaDocument):
+            doc = message.media.document
+            if doc.size > MAX_MEDIA_BYTES:
+                log.info(f"Skipping media: too large ({doc.size // 1024 // 1024} MB)")
+                return None, None, None
+
+            filename = "file"
+            is_video = False
+            is_animation = False
+            for attr in doc.attributes:
+                attr_type = type(attr).__name__
+                if attr_type == "DocumentAttributeFilename":
+                    filename = attr.file_name
+                if attr_type == "DocumentAttributeVideo":
+                    is_video = True
+                if attr_type == "DocumentAttributeAnimated":
+                    is_animation = True
+
+            media_bytes = await client.download_media(message, file=bytes)
+
+            if is_animation:
+                return media_bytes, "animation", filename or "animation.gif"
+            if is_video:
+                return media_bytes, "video", filename or "video.mp4"
+            return media_bytes, "document", filename
+
+    except Exception as e:
+        log.error(f"Failed to download media: {e}")
+
+    return None, None, None
+
+
+MAX_CAPTION_LEN = 1024  # Telegram Bot API hard limit for media captions
+
+
+async def send_via_bot(
+    channel_name: str,
+    rewritten: str,
+    media_bytes: bytes | None = None,
+    media_type: str | None = None,
+    media_filename: str | None = None,
+) -> None:
+    source_line = f"Источник: {channel_name}"
+    full_text = f"{source_line}\n\n{rewritten}"
+
+    try:
+        async with httpx.AsyncClient(timeout=120) as http:
+            if media_bytes and media_type:
+                # If caption would exceed Telegram's limit, send media + source only,
+                # then send the full rewritten text as a separate message.
+                if len(full_text) > MAX_CAPTION_LEN:
+                    short_caption = source_line
+                    await _send_media(http, media_bytes, media_type, media_filename, short_caption)
+                    await asyncio.sleep(1)
+                    await _send_text_only(full_text)
+                else:
+                    await _send_media(http, media_bytes, media_type, media_filename, full_text)
+            else:
+                resp = await http.post(
+                    f"{BOT_API_URL}/sendMessage",
+                    json={
+                        "chat_id": TARGET_CHAT_ID,
+                        "text": full_text,
+                        "parse_mode": "HTML",
+                    },
+                )
+                data = resp.json()
+                if not data.get("ok"):
+                    log.error(f"Bot API sendMessage error: {data}")
+                    return
+
+            log.info(f"✅ Sent rewritten post from {channel_name}" + (" + media" if media_bytes else ""))
+
+    except Exception as e:
+        log.error(f"Failed to send via bot API: {e}")
+
+
+async def _send_media(
+    http: httpx.AsyncClient,
+    media_bytes: bytes,
+    media_type: str,
+    media_filename: str | None,
+    caption: str,
+) -> None:
+    endpoint_map = {
+        "photo": ("sendPhoto", "photo", media_filename or "photo.jpg"),
+        "video": ("sendVideo", "video", media_filename or "video.mp4"),
+        "animation": ("sendAnimation", "animation", media_filename or "animation.gif"),
+        "document": ("sendDocument", "document", media_filename or "file"),
+    }
+    method, field, filename = endpoint_map.get(media_type, ("sendDocument", "document", media_filename or "file"))
+    resp = await http.post(
+        f"{BOT_API_URL}/{method}",
+        data={"chat_id": TARGET_CHAT_ID, "caption": caption, "parse_mode": "HTML"},
+        files={field: (filename, media_bytes)},
+    )
+    data = resp.json()
+    if not data.get("ok"):
+        log.error(f"Bot API {method} error: {data}")
+
+
+async def _send_text_only(text: str) -> None:
     try:
         async with httpx.AsyncClient(timeout=30) as http:
             resp = await http.post(
                 f"{BOT_API_URL}/sendMessage",
-                json={"chat_id": TARGET_CHAT_ID, "text": text},
+                json={
+                    "chat_id": TARGET_CHAT_ID,
+                    "text": text,
+                    "parse_mode": "HTML",
+                },
             )
             data = resp.json()
             if not data.get("ok"):
-                log.error(f"Bot API error sending to {TARGET_CHAT_ID}: {data}")
+                log.error(f"Text-only fallback also failed: {data}")
             else:
-                log.info(f"✅ Sent rewritten post from {channel_name}")
+                log.info("✅ Sent text-only fallback")
     except Exception as e:
-        log.error(f"Failed to send via bot API: {e}")
+        log.error(f"Text-only fallback error: {e}")
+
+
+async def process_message(client: TelegramClient, channel: str, message) -> None:
+    """Rewrite text, download media if present, send to target chat."""
+    html_text = message_to_html(message)
+    plain_text = message.message or ""
+
+    has_text = len(plain_text.strip()) >= MIN_POST_LENGTH
+    has_media = message.media is not None
+
+    if not has_text and not has_media:
+        return
+
+    rewritten = None
+    if has_text:
+        rewritten = await rewrite_post(html_text, channel)
+
+    media_bytes, media_type, media_filename = None, None, None
+    if has_media:
+        log.info(f"[{channel}] Downloading media for msg {message.id}...")
+        media_bytes, media_type, media_filename = await get_media_info(client, message)
+
+    if rewritten or media_bytes:
+        text_to_send = rewritten or plain_text.strip()
+        await send_via_bot(channel, text_to_send, media_bytes, media_type, media_filename)
 
 
 async def check_channel(client: TelegramClient, state: dict, channel: str) -> None:
@@ -188,27 +359,22 @@ async def check_channel(client: TelegramClient, state: dict, channel: str) -> No
     if not new_messages:
         return
 
-    # Process oldest first
     new_messages.sort(key=lambda m: m.id)
 
     for message in new_messages:
-        text = message.text or message.message or ""
-        if not text or len(text.strip()) < MIN_POST_LENGTH:
-            log.info(f"[{channel}] Skipping msg {message.id}: too short ({len(text.strip())} chars)")
+        text = message.message or ""
+        has_media = message.media is not None
+
+        if len(text.strip()) < MIN_POST_LENGTH and not has_media:
+            log.info(f"[{channel}] Skipping msg {message.id}: too short and no media")
             state[channel_key] = max(state.get(channel_key, 0), message.id)
             continue
 
-        log.info(f"[{channel}] New post {message.id} ({len(text)} chars) — rewriting...")
-        rewritten = await rewrite_post(text, channel)
-        if rewritten:
-            await send_via_bot(channel, rewritten)
-        else:
-            log.warning(f"[{channel}] Rewrite returned nothing for msg {message.id}")
+        log.info(f"[{channel}] New post {message.id} ({len(text)} chars, media={has_media}) — processing...")
+        await process_message(client, channel, message)
 
         state[channel_key] = max(state.get(channel_key, 0), message.id)
         save_state(state)
-
-        # Small pause between posts to avoid rate limits
         await asyncio.sleep(2)
 
 
@@ -222,22 +388,19 @@ async def bootstrap(client: TelegramClient, state: dict) -> dict:
                 state[channel_key] = 0
                 continue
 
-            # Process oldest first
             to_process = sorted(messages, key=lambda m: m.id)
 
             for message in to_process:
-                text = message.text or message.message or ""
-                if not text or len(text.strip()) < MIN_POST_LENGTH:
-                    log.info(f"[{channel}] Skipping initial msg {message.id}: too short")
+                text = message.message or ""
+                has_media = message.media is not None
+
+                if len(text.strip()) < MIN_POST_LENGTH and not has_media:
+                    log.info(f"[{channel}] Skipping initial msg {message.id}: too short and no media")
                     state[channel_key] = max(state.get(channel_key, 0), message.id)
                     continue
 
-                log.info(f"[{channel}] Sending initial post {message.id} ({len(text)} chars)...")
-                rewritten = await rewrite_post(text, channel)
-                if rewritten:
-                    await send_via_bot(channel, rewritten)
-                else:
-                    log.warning(f"[{channel}] Rewrite failed for initial post {message.id}")
+                log.info(f"[{channel}] Sending initial post {message.id} ({len(text)} chars, media={has_media})...")
+                await process_message(client, channel, message)
 
                 state[channel_key] = max(state.get(channel_key, 0), message.id)
                 save_state(state)
