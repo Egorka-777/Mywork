@@ -71,6 +71,11 @@ def save_state(state: dict) -> None:
         log.error(f"Could not save state.json: {e}")
 
 
+def is_tracker_enabled(state: dict) -> bool:
+    """Управляется с рабочего стола: state.json → tracker_enabled (по умолчанию True)."""
+    return state.get("tracker_enabled", True)
+
+
 def is_bootstrap_done(state: dict) -> bool:
     return state.get("__bootstrapped__", False)
 
@@ -418,7 +423,17 @@ async def bootstrap(client: TelegramClient, state: dict) -> dict:
 async def poll_loop(client: TelegramClient, state: dict) -> None:
     log.info(f"Polling every {POLL_INTERVAL}s for new posts in {len(SOURCE_CHANNELS)} channels...")
     while True:
+        state = load_state()
+        if not is_tracker_enabled(state):
+            log.info("Tracker выключен (tracker_enabled=false). Ожидаю…")
+            await asyncio.sleep(POLL_INTERVAL)
+            continue
+        if not is_bootstrap_done(state):
+            state = await bootstrap(client, state)
         for channel in SOURCE_CHANNELS:
+            state = load_state()
+            if not is_tracker_enabled(state):
+                break
             await check_channel(client, state, channel)
         await asyncio.sleep(POLL_INTERVAL)
 
@@ -438,7 +453,7 @@ async def main() -> None:
     await client.start()
     log.info("Telegram connected.")
 
-    if not is_bootstrap_done(state):
+    if is_tracker_enabled(state) and not is_bootstrap_done(state):
         state = await bootstrap(client, state)
 
     await poll_loop(client, state)

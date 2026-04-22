@@ -1,0 +1,44 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "DM Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --color-surface-0: #0a0a0c;
+  --color-surface-1: #121216;
+  --color-surface-2: #1a1a21;
+  --color-border: #2a2a35;
+  --color-muted: #6b6b7a;
+  --color-accent: #5b8def;
+  --color-accent-dim: #3d5a8a;
+  --color-warn: #e8b339;
+  --color-ok: #3ecf8e;
+  --color-freedz: #c27aff;
+}
+
+body {
+  font-family: var(--font-sans);
+  background: var(--color-surface-0);
+  color: #e8e8ef;
+  -webkit-font-smoothing: antialiased;
+}
+
+@layer components {
+  .card-glass {
+    @apply border border-white/8 bg-white/[0.02] shadow-[0_0_0_1px_rgba(255,255,255,0.03)] backdrop-blur-sm;
+  }
+  .trk-toggle {
+    @apply relative inline-flex h-8 w-14 shrink-0 cursor-pointer items-center rounded-full border border-white/10 bg-[#1a1a21] transition-[background-color,box-shadow] duration-200;
+  }
+  .trk-toggle[data-state="on"] {
+    @apply border-[#3d5a8a] bg-gradient-to-r from-[#1e3a5f] to-[#2563a8] shadow-[0_0_20px_rgba(91,141,239,0.25)];
+  }
+  .trk-knob {
+    @apply pointer-events-none absolute top-0.5 left-0.5 h-7 w-7 rounded-full bg-white shadow transition-transform duration-200;
+  }
+  .trk-toggle[data-state="on"] .trk-knob {
+    @apply translate-x-6;
+  }
+  .flow-line {
+    background: linear-gradient(90deg, var(--color-border) 0%, var(--color-accent-dim) 50%, var(--color-border) 100%);
+  }
+}
