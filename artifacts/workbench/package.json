@@ -11,9 +11,11 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@fal-ai/client": "^1.9.5",
     "cors": "^2.8.5",
     "express": "^5.0.0",
     "lucide-react": "catalog:",
+    "openai": "^6.34.0",
     "react": "catalog:",
     "react-dom": "catalog:",
     "tailwindcss": "catalog:"
