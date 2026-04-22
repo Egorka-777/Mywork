@@ -283,7 +283,7 @@ export function FreedzPipeline() {
           <code className="font-mono text-white/35">
             gemini-2.0-flash-lite-001
           </code>{" "}
-          · Генерация: flux/schnell
+          · Генерация: nano-banana-pro/edit
         </p>
       </div>
     </div>

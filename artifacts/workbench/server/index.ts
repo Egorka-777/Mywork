@@ -162,8 +162,8 @@ app.post("/wb/pipeline/image", async (req, res) => {
     return res.status(503).json({ error: "FAL_KEY not configured" });
   }
   try {
-    const result = await fal.subscribe("fal-ai/flux/schnell", {
-      input: { prompt, image_size: "square_hd", num_images: 1 },
+    const result = await fal.subscribe("fal-ai/nano-banana-pro/edit", {
+      input: { prompt, num_images: 1 },
     });
     const images = (result.data as { images?: { url: string }[] }).images ?? [];
     const url = images[0]?.url ?? null;
