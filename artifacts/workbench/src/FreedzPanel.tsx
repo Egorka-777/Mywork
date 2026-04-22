@@ -22,7 +22,7 @@ export function FreedzPanel({
   useEffect(() => {
     (async () => {
       try {
-        const r = await fetch("/api/freedz");
+        const r = await fetch("/wb/freedz");
         if (!r.ok) {
           setError("Не удалось загрузить freedz-pipeline.json");
           return;

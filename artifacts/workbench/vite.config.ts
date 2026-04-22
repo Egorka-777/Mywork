@@ -13,10 +13,11 @@ export default defineConfig({
     alias: { "@": path.resolve(__dirname, "src") },
   },
   server: {
-    port: 5180,
-    host: "127.0.0.1",
+    port: Number(process.env.PORT) || 5180,
+    host: "0.0.0.0",
+    allowedHosts: true,
     strictPort: true,
-    proxy: { "/api": { target: `http://127.0.0.1:${apiPort}` } },
+    proxy: { "/wb": { target: `http://127.0.0.1:${apiPort}` } },
   },
   build: {
     outDir: "dist",

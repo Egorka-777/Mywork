@@ -15,7 +15,8 @@
     "express": "^5.0.0",
     "lucide-react": "catalog:",
     "react": "catalog:",
-    "react-dom": "catalog:"
+    "react-dom": "catalog:",
+    "tailwindcss": "catalog:"
   },
   "devDependencies": {
     "@tailwindcss/vite": "catalog:",

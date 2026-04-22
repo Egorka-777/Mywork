@@ -23,11 +23,11 @@ const app = express();
 app.use(cors({ origin: true }));
 app.use(express.json({ limit: "1mb" }));
 
-app.get("/api/health", (_req, res) => {
+app.get("/wb/health", (_req, res) => {
   res.json({ ok: true, statePath: STATE_FILE });
 });
 
-app.get("/api/tracker", async (_req, res) => {
+app.get("/wb/tracker", async (_req, res) => {
   try {
     const raw = await fs.readFile(STATE_FILE, "utf-8");
     const data = JSON.parse(raw) as { tracker_enabled?: boolean };
@@ -43,7 +43,7 @@ app.get("/api/tracker", async (_req, res) => {
   }
 });
 
-app.put("/api/tracker", async (req, res) => {
+app.put("/wb/tracker", async (req, res) => {
   const { enabled } = req.body as { enabled?: boolean };
   if (typeof enabled !== "boolean") {
     return res.status(400).json({ error: "Body must be { \"enabled\": boolean }" });
@@ -63,7 +63,7 @@ app.put("/api/tracker", async (req, res) => {
   }
 });
 
-app.get("/api/freedz", async (_req, res) => {
+app.get("/wb/freedz", async (_req, res) => {
   try {
     const raw = await fs.readFile(FREEDZ_FILE, "utf-8");
     return res.type("json").send(raw);
@@ -76,7 +76,7 @@ app.get("/api/freedz", async (_req, res) => {
   }
 });
 
-app.put("/api/freedz", async (req, res) => {
+app.put("/wb/freedz", async (req, res) => {
   try {
     const body = req.body;
     const text = JSON.stringify(body, null, 2) + "\n";

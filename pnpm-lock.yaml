@@ -55,7 +55,7 @@ catalogs:
       specifier: ^3.3.1
       version: 3.5.0
     tailwindcss:
-      specifier: ^4.1.14
+      specifier: 4.2.1
       version: 4.2.1
     tsx:
       specifier: ^4.21.0
@@ -401,6 +401,9 @@ importers:
       react-dom:
         specifier: 'catalog:'
         version: 19.1.0(react@19.1.0)
+      tailwindcss:
+        specifier: 'catalog:'
+        version: 4.2.1
     devDependencies:
       '@tailwindcss/vite':
         specifier: 'catalog:'

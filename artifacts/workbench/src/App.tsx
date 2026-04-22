@@ -24,7 +24,7 @@ export default function App() {
 
   const loadFreedz = useCallback(async () => {
     try {
-      const r = await fetch("/api/freedz");
+      const r = await fetch("/wb/freedz");
       if (!r.ok) {
         setFreedzError(`Freedz: ${r.status}`);
         return;

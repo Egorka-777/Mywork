@@ -1,0 +1,16 @@
+kind = "web"
+previewPath = "/"
+title = "Рабочее пространство"
+version = "1.0.0"
+
+[[services]]
+localPort = 5180
+name = "web"
+paths = ["/"]
+
+[services.env]
+PORT = "5180"
+WORKBENCH_API_PORT = "8788"
+
+[services.development]
+run = "pnpm --filter @workspace/workbench run dev"

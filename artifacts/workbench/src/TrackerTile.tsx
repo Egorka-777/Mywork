@@ -10,7 +10,7 @@ export function TrackerTile() {
   const load = useCallback(async () => {
     setError(null);
     try {
-      const r = await fetch("/api/tracker");
+      const r = await fetch("/wb/tracker");
       if (!r.ok) {
         const t = await r.text();
         throw new Error(t || r.statusText);
@@ -33,7 +33,7 @@ export function TrackerTile() {
     setError(null);
     setEnabled(next);
     try {
-      const r = await fetch("/api/tracker", {
+      const r = await fetch("/wb/tracker", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabled: next }),
