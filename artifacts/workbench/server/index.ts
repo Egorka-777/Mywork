@@ -6,6 +6,13 @@ import { fileURLToPath } from "node:url";
 import OpenAI from "openai";
 import { fal } from "@fal-ai/client";
 import multer from "multer";
+import {
+  ExtractError,
+  RewriteError,
+  SOURCE_REWRITER_ALLOWED_EXT,
+  extractSourceFromUpload,
+  rewriteSourceRequest,
+} from "./sourceRewriter";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..", "..", "..");
@@ -58,9 +65,22 @@ const upload = multer({
   },
 });
 
+const sourceRewriterUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 25 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const ext = path.extname(file.originalname || "").toLowerCase();
+    if (SOURCE_REWRITER_ALLOWED_EXT.has(ext)) {
+      cb(null, true);
+      return;
+    }
+    cb(new Error("UNSUPPORTED_SOURCE_REWRITER_TYPE"));
+  },
+});
+
 const app = express();
 app.use(cors({ origin: true }));
-app.use(express.json({ limit: "4mb" }));
+app.use(express.json({ limit: "32mb" }));
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -867,6 +887,72 @@ app.post("/wb/carousel/publish-instagram", async (req, res) => {
     });
   } catch (e) {
     return res.status(500).json({ error: String(e) });
+  }
+});
+
+// ─── source rewriter ───────────────────────────────────────────────────────
+
+app.post(
+  "/wb/source-rewriter/extract",
+  (req, res, next) => {
+    sourceRewriterUpload.single("file")(req, res, (err: unknown): void => {
+      if (err) {
+        const m = err as { code?: string; message?: string };
+        if (m.code === "LIMIT_FILE_SIZE") {
+          res.status(413).json({ error: "file too large" });
+          return;
+        }
+        if (
+          typeof m.message === "string" &&
+          m.message.includes("UNSUPPORTED_SOURCE_REWRITER_TYPE")
+        ) {
+          res.status(400).json({ error: "unsupported file type" });
+          return;
+        }
+        res.status(400).json({ error: String(err) });
+        return;
+      }
+      next();
+    });
+  },
+  async (req, res) => {
+    const file = req.file;
+    if (!file) {
+      return res.status(400).json({ error: "file is required" });
+    }
+    try {
+      const result = await extractSourceFromUpload(
+        openrouter,
+        {
+          visionModel: VISION_MODEL,
+          hasOpenRouter: !!OPENROUTER_KEY,
+        },
+        file
+      );
+      return res.json(result);
+    } catch (e) {
+      if (e instanceof ExtractError) {
+        return res.status(e.status).json(e.body);
+      }
+      return res
+        .status(500)
+        .json({ error: "extraction failed", detail: String(e) });
+    }
+  }
+);
+
+app.post("/wb/source-rewriter/rewrite", async (req, res) => {
+  if (!OPENROUTER_KEY) {
+    return res.status(503).json({ error: "OPENROUTER_API_KEY not configured" });
+  }
+  try {
+    const out = await rewriteSourceRequest(openrouter, TEXT_MODEL, req.body);
+    return res.json(out);
+  } catch (e) {
+    if (e instanceof RewriteError) {
+      return res.status(e.status).json(e.body);
+    }
+    return res.status(500).json({ error: "rewrite failed", detail: String(e) });
   }
 });
 

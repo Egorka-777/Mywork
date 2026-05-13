@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { CarouselRemixPanel } from "./CarouselRemixPanel";
 import { FreedzPanel } from "./FreedzPanel";
+import { SourceRewriterPanel } from "./SourceRewriterPanel";
 import { TrackerTile } from "./TrackerTile";
 
 type FreedzMeta = {
@@ -23,6 +24,7 @@ export default function App() {
   const [freedzError, setFreedzError] = useState<string | null>(null);
   const [openFreedz, setOpenFreedz] = useState(false);
   const [openCarouselRemix, setOpenCarouselRemix] = useState(false);
+  const [openSourceRewriter, setOpenSourceRewriter] = useState(false);
 
   const loadFreedz = useCallback(async () => {
     try {
@@ -90,6 +92,10 @@ export default function App() {
             onOpen={() => setOpenCarouselRemix(true)}
             open={openCarouselRemix}
           />
+          <SourceRewriterCard
+            onOpen={() => setOpenSourceRewriter(true)}
+            open={openSourceRewriter}
+          />
         </div>
       </main>
 
@@ -102,6 +108,72 @@ export default function App() {
       {openCarouselRemix && (
         <CarouselRemixPanel onClose={() => setOpenCarouselRemix(false)} />
       )}
+      {openSourceRewriter && (
+        <SourceRewriterPanel onClose={() => setOpenSourceRewriter(false)} />
+      )}
+    </div>
+  );
+}
+
+function SourceRewriterCard({
+  onOpen,
+  open,
+}: {
+  onOpen: () => void;
+  open: boolean;
+}) {
+  return (
+    <div
+      className={`card-glass group relative flex flex-col overflow-hidden rounded-2xl p-5 transition [box-shadow:0_0_0_1px_rgba(20,184,166,0.12)] ${
+        open
+          ? "ring-1 ring-[#14b8a6]/35"
+          : "hover:ring-1 hover:ring-[#14b8a6]/25"
+      }`}
+    >
+      <div
+        className="absolute top-0 right-0 h-32 w-32 rounded-full opacity-20 blur-3xl"
+        style={{ background: "#14b8a6" }}
+        aria-hidden
+      />
+      <div className="relative flex items-start justify-between gap-3">
+        <div>
+          <h2 className="font-sans text-lg font-semibold text-white">
+            Source Rewriter
+          </h2>
+          <p className="mt-1 text-sm text-[#6b6b7a]">
+            Видео, аудио, PDF, презентации, изображения и тексты → извлечение →
+            проверка → переписывание в моём стиле.
+          </p>
+        </div>
+        <div className="hidden shrink-0 md:flex" aria-hidden>
+          <div className="flex flex-col gap-0.5">
+            <div className="h-1.5 w-1.5 rounded-full bg-white/20" />
+            <div className="h-1.5 w-1.5 rounded-full bg-white/20" />
+            <div className="h-1.5 w-1.5 rounded-full bg-white/20" />
+          </div>
+        </div>
+      </div>
+      <div className="relative mt-3 flex flex-wrap items-center gap-2 text-xs">
+        <span className="rounded-full border border-[#14b8a6]/30 bg-[#14b8a6]/10 px-2 py-0.5 text-[#5eead4]">
+          extractor + rewriter
+        </span>
+      </div>
+      <div className="relative mt-5 flex min-h-12 flex-1">
+        <div className="flex w-full items-center justify-between gap-2 rounded-xl border border-white/6 bg-white/[0.02] px-3 py-2">
+          <div className="flex flex-1 items-center gap-1.5 overflow-hidden text-white/30">
+            <Sparkles className="h-3.5 w-3.5 shrink-0" />
+            <ImageIcon className="h-3.5 w-3.5 shrink-0" />
+            <Database className="h-3.5 w-3.5 shrink-0" />
+          </div>
+        </div>
+      </div>
+      <button
+        type="button"
+        onClick={onOpen}
+        className="relative mt-4 w-full rounded-xl border border-[#14b8a6]/25 bg-gradient-to-b from-[#0f2a28]/90 to-[#0a1816]/70 py-2.5 text-sm font-medium text-white transition hover:border-[#14b8a6]/45 hover:from-[#123530]/90"
+      >
+        Открыть
+      </button>
     </div>
   );
 }
