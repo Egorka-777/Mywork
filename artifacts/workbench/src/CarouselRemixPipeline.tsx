@@ -206,6 +206,9 @@ export function CarouselRemixPipeline() {
       const fd = new FormData();
       fd.append("slidesJson", JSON.stringify(s.analyses));
       if (userPhotoRef.current) fd.append("userPhoto", userPhotoRef.current);
+      if (s.importedSlides.length === 0 && manualFilesRef.current.length > 0) {
+        for (const f of manualFilesRef.current) fd.append("slideFiles", f);
+      }
       const r = await fetch("/wb/carousel/generate", { method: "POST", body: fd });
       const d = await r.json() as {
         ok?: boolean;

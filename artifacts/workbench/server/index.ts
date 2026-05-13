@@ -548,6 +548,13 @@ app.post("/wb/carousel/rewrite", async (req, res) => {
       return res.status(502).json({ error: "Invalid model JSON response", raw: rawText.slice(0, 2000) });
     }
 
+    const inputIndices = (slides as { slideIndex: number }[]).map((s) => s.slideIndex);
+    const outputIndices = parsed.slides.map((s) => s.slideIndex);
+    const orderMismatch = inputIndices.some((idx, pos) => outputIndices[pos] !== idx);
+    if (orderMismatch) {
+      return res.status(502).json({ error: "Invalid model JSON response: slideIndex order mismatch", raw: rawText.slice(0, 2000) });
+    }
+
     return res.json({ ok: true, slides: parsed.slides, rewrittenCaption: parsed.rewrittenCaption ?? "" });
   } catch (e) {
     return res.status(500).json({ error: String(e) });
@@ -558,7 +565,7 @@ app.post("/wb/carousel/rewrite", async (req, res) => {
 
 app.post(
   "/wb/carousel/generate",
-  upload.fields([{ name: "userPhoto", maxCount: 1 }]),
+  upload.fields([{ name: "userPhoto", maxCount: 1 }, { name: "slideFiles", maxCount: 20 }]),
   async (req, res) => {
     if (!FAL_KEY) {
       return res.status(503).json({ error: "FAL_KEY not configured" });
@@ -585,6 +592,7 @@ app.post(
 
     const filesMap = req.files as Record<string, Express.Multer.File[]> | undefined;
     const userPhotoFile = filesMap?.["userPhoto"]?.[0] ?? null;
+    const slideFiles = filesMap?.["slideFiles"] ?? [];
 
     let userPhotoFalUrl: string | null = null;
     if (userPhotoFile) {
@@ -597,12 +605,16 @@ app.post(
 
     const results: { slideIndex: number; generatedImageUrl: string | null; error: string | null }[] = [];
 
-    for (const slide of slides) {
+    for (let i = 0; i < slides.length; i++) {
+      const slide = slides[i];
       try {
         const imageUrls: string[] = [];
 
         if (slide.sourceImageUrl) {
           const falUrl = await remoteImageToFalUrl(slide.sourceImageUrl);
+          imageUrls.push(falUrl);
+        } else if (slideFiles[i]) {
+          const falUrl = await fileToFalUrl(slideFiles[i]);
           imageUrls.push(falUrl);
         }
 
