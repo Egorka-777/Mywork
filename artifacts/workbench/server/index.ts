@@ -758,17 +758,18 @@ app.post("/wb/carousel/publish-instagram", async (req, res) => {
   }
 
   try {
-    // Step 1: create a media container for each carousel image
+    // Step 1: create a media container for each carousel image (form-encoded per Meta spec)
     const itemIds: string[] = [];
     for (const imageUrl of imageUrls) {
+      const itemParams = new URLSearchParams({
+        image_url: imageUrl,
+        is_carousel_item: "true",
+        access_token: token,
+      });
       const itemRes = await fetch(`${baseUrl}/${igUserId}/media`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          image_url: imageUrl,
-          is_carousel_item: true,
-          access_token: token,
-        }),
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: itemParams.toString(),
       });
       const itemData = (await itemRes.json()) as { id?: string; error?: { message?: string } };
       if (!itemData.id) {
@@ -777,7 +778,7 @@ app.post("/wb/carousel/publish-instagram", async (req, res) => {
           detail: itemData.error?.message ?? itemData,
         });
       }
-      // Poll each item container until ready
+      // Poll item container until FINISHED
       const itemReady = await pollContainerReady(itemData.id);
       if (!itemReady.ready) {
         return res.status(502).json({
@@ -788,16 +789,17 @@ app.post("/wb/carousel/publish-instagram", async (req, res) => {
       itemIds.push(itemData.id);
     }
 
-    // Step 2: create carousel container
+    // Step 2: create carousel container (form-encoded)
+    const carouselParams = new URLSearchParams({
+      media_type: "CAROUSEL",
+      children: itemIds.join(","),
+      caption: caption.trim(),
+      access_token: token,
+    });
     const carouselRes = await fetch(`${baseUrl}/${igUserId}/media`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        media_type: "CAROUSEL",
-        children: itemIds.join(","),
-        caption: caption.trim(),
-        access_token: token,
-      }),
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: carouselParams.toString(),
     });
     const carouselData = (await carouselRes.json()) as {
       id?: string;
@@ -810,7 +812,7 @@ app.post("/wb/carousel/publish-instagram", async (req, res) => {
       });
     }
 
-    // Poll carousel container until ready
+    // Poll carousel container until FINISHED
     const carouselReady = await pollContainerReady(carouselData.id);
     if (!carouselReady.ready) {
       return res.status(502).json({
@@ -819,14 +821,15 @@ app.post("/wb/carousel/publish-instagram", async (req, res) => {
       });
     }
 
-    // Step 3: publish
+    // Step 3: publish (form-encoded)
+    const publishParams = new URLSearchParams({
+      creation_id: carouselData.id,
+      access_token: token,
+    });
     const publishRes = await fetch(`${baseUrl}/${igUserId}/media_publish`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        creation_id: carouselData.id,
-        access_token: token,
-      }),
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: publishParams.toString(),
     });
     const publishData = (await publishRes.json()) as {
       id?: string;
@@ -843,7 +846,7 @@ app.post("/wb/carousel/publish-instagram", async (req, res) => {
     let permalink: string | null = null;
     try {
       const infoRes = await fetch(
-        `${baseUrl}/${publishData.id}?fields=permalink&access_token=${token}`
+        `${baseUrl}/${publishData.id}?fields=permalink&access_token=${encodeURIComponent(token)}`
       );
       const infoData = (await infoRes.json()) as { permalink?: string };
       permalink = infoData.permalink ?? null;

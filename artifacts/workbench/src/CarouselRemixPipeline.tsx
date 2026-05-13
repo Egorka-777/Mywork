@@ -77,13 +77,18 @@ function buildGptPromptPack(analyses: SlideAnalysis[], styleNotes: string): stri
       a.mentionedPeople.length > 0
         ? a.mentionedPeople.map((p) => `- ${p}`).join("\n")
         : "- none";
-    const allBrands = [
-      ...a.mentionedBrands,
-      ...a.mentionedTools,
-      ...a.mentionedPlatforms,
-    ];
-    const brandsStr =
-      allBrands.length > 0 ? allBrands.map((b) => `- ${b}`).join("\n") : "- none";
+    const brands =
+      a.mentionedBrands.length > 0
+        ? a.mentionedBrands.map((b) => `- ${b}`).join("\n")
+        : "- none";
+    const tools =
+      a.mentionedTools.length > 0
+        ? a.mentionedTools.map((t) => `- ${t}`).join("\n")
+        : "- none";
+    const platforms =
+      a.mentionedPlatforms.length > 0
+        ? a.mentionedPlatforms.map((p) => `- ${p}`).join("\n")
+        : "- none";
     const visualElementsStr =
       a.visualElements.length > 0
         ? a.visualElements.map((v) => `- ${v}`).join("\n")
@@ -115,8 +120,14 @@ ${visualElementsStr}
 PEOPLE:
 ${people}
 
-BRANDS / TOOLS / PLATFORMS:
-${brandsStr}
+BRANDS:
+${brands}
+
+TOOLS:
+${tools}
+
+PLATFORMS:
+${platforms}
 
 SCREENSHOT:
 ${screenshotStr}
