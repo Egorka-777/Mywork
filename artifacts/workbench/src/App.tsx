@@ -124,7 +124,7 @@ function FreedzCard({
       <div className="relative flex items-start justify-between gap-3">
         <div>
           <h2 className="font-sans text-lg font-semibold text-white">
-            Freedz — пост + картинка
+            Threads — пост + картинка
           </h2>
           <p className="mt-1 text-sm text-[#6b6b7a]">
             Текст из источников → Gemini (стиль) → картинка (Fal.ai) →
