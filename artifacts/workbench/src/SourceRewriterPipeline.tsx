@@ -28,38 +28,38 @@ export type {
 const REWRITE_MODE_OPTIONS: { value: RewriteMode; label: string }[] = [
   {
     value: "preserve_original_structure",
-    label: "Preserve original structure",
+    label: "Сохранить исходную структуру",
   },
-  { value: "storytelling_text", label: "Turn into storytelling text" },
-  { value: "presentation_text", label: "Turn into presentation text" },
-  { value: "carousel_script", label: "Turn into carousel script" },
-  { value: "lesson_material", label: "Turn into lesson / training material" },
-  { value: "clean_article", label: "Turn into clean article" },
-  { value: "sales_page_text", label: "Turn into sales page text" },
-  { value: "telegram_post", label: "Turn into Telegram post" },
-  { value: "instagram_post", label: "Turn into Instagram post" },
+  { value: "storytelling_text", label: "Преобразовать в сторителлинг" },
+  { value: "presentation_text", label: "Преобразовать в текст презентации" },
+  { value: "carousel_script", label: "Преобразовать в сценарий карусели" },
+  { value: "lesson_material", label: "Преобразовать в урок / учебный материал" },
+  { value: "clean_article", label: "Преобразовать в статью" },
+  { value: "sales_page_text", label: "Преобразовать в продающий текст" },
+  { value: "telegram_post", label: "Преобразовать в Telegram-пост" },
+  { value: "instagram_post", label: "Преобразовать в Instagram-пост" },
 ];
 
 const OUTPUT_LENGTH_OPTIONS: { value: OutputLength; label: string }[] = [
-  { value: "keep_similar_length", label: "Keep similar length" },
-  { value: "shorter", label: "Shorter" },
-  { value: "longer", label: "Longer" },
-  { value: "very_concise", label: "Very concise" },
-  { value: "expanded", label: "Expanded" },
+  { value: "keep_similar_length", label: "Сохранить похожий объём" },
+  { value: "shorter", label: "Короче" },
+  { value: "longer", label: "Длиннее" },
+  { value: "very_concise", label: "Очень кратко" },
+  { value: "expanded", label: "Развёрнуто" },
 ];
 
 const STYLE_INTENSITY_OPTIONS: { value: StyleIntensity; label: string }[] = [
-  { value: "light_rewrite", label: "Light rewrite" },
-  { value: "normal_rewrite", label: "Normal rewrite" },
-  { value: "strong_rewrite", label: "Strong rewrite" },
+  { value: "light_rewrite", label: "Лёгкая переработка" },
+  { value: "normal_rewrite", label: "Стандартная переработка" },
+  { value: "strong_rewrite", label: "Глубокая переработка" },
 ];
 
 const PLAGIARISM_OPTIONS: { value: PlagiarismSafety; label: string }[] = [
-  { value: "light_uniqueness", label: "Light uniqueness" },
-  { value: "strong_uniqueness", label: "Strong uniqueness" },
+  { value: "light_uniqueness", label: "Лёгкая уникализация" },
+  { value: "strong_uniqueness", label: "Сильная уникализация" },
   {
     value: "maximum_uniqueness_without_losing_meaning",
-    label: "Maximum uniqueness without losing meaning",
+    label: "Максимальная уникализация без потери смысла",
   },
 ];
 
@@ -86,21 +86,21 @@ function sectionTitle(text: string) {
 }
 
 function buildStructuredMarkdown(r: RewrittenSource): string {
-  const lines: string[] = ["# Rewritten source", ""];
+  const lines: string[] = ["# Переписанный материал", ""];
   if (r.rewrittenPages?.length) {
     for (const p of r.rewrittenPages) {
-      lines.push(`## Page ${p.pageNumber}`, "", p.rewrittenText, "");
+      lines.push(`## Страница ${p.pageNumber}`, "", p.rewrittenText, "");
     }
     return lines.join("\n");
   }
   if (r.rewrittenSlides?.length) {
     for (const s of r.rewrittenSlides) {
-      lines.push(`## Slide ${s.slideNumber}`, "", s.rewrittenText, "");
+      lines.push(`## Слайд ${s.slideNumber}`, "", s.rewrittenText, "");
     }
     return lines.join("\n");
   }
   if (r.rewrittenTranscript?.trim()) {
-    lines.push("## Transcript", "", r.rewrittenTranscript, "");
+    lines.push("## Транскрипт", "", r.rewrittenTranscript, "");
     return lines.join("\n");
   }
   return lines.join("\n");
@@ -135,7 +135,7 @@ function VisualAssetFields({
     <div className="space-y-2 rounded-lg border border-white/8 bg-white/[0.02] p-3">
       <p className="text-xs font-medium text-[#14b8a6]">{prefix}</p>
       <label className="block text-xs text-white/45">
-        type
+        тип
         <select
           className={fieldClass()}
           value={asset.type}
@@ -163,14 +163,14 @@ function VisualAssetFields({
       </label>
       {(
         [
-          ["visibleText", "visible text"],
-          ["visualDescription", "visual description"],
-          ["styleDescription", "style description"],
-          ["clothing", "clothing"],
-          ["accessoriesAndProps", "accessories and props"],
-          ["lighting", "lighting"],
-          ["background", "background"],
-          ["composition", "composition"],
+          ["visibleText", "видимый текст"],
+          ["visualDescription", "визуальное описание"],
+          ["styleDescription", "описание стиля"],
+          ["clothing", "одежда"],
+          ["accessoriesAndProps", "аксессуары и реквизит"],
+          ["lighting", "освещение"],
+          ["background", "фон"],
+          ["composition", "композиция"],
         ] as const
       ).map(([key, label]) => (
         <label key={key} className="block text-xs text-white/45">
@@ -183,7 +183,7 @@ function VisualAssetFields({
         </label>
       ))}
       <label className="block text-xs text-white/45">
-        colors (one per line)
+        цвета (по одному в строке)
         <textarea
           className={`${fieldClass()} min-h-[52px]`}
           value={asset.colors.join("\n")}
@@ -198,7 +198,7 @@ function VisualAssetFields({
         />
       </label>
       <label className="block text-xs text-white/45">
-        recreation notes (one per line)
+        заметки для воссоздания (по одному)
         <textarea
           className={`${fieldClass()} min-h-[52px]`}
           value={asset.recreationNotes.join("\n")}
@@ -334,7 +334,7 @@ export function SourceRewriterPipeline() {
 
       {/* 1. Upload Source */}
       <section className="rounded-xl border border-white/8 bg-white/[0.02] p-4">
-        {sectionTitle("1. Upload Source")}
+        {sectionTitle("1. Загрузить файл")}
         <input
           key={fileKey}
           ref={fileRef}
@@ -359,21 +359,21 @@ export function SourceRewriterPipeline() {
           {status === "extracting" && (
             <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
           )}
-          Extract source
+          {status === "extracting" ? "Извлекаю…" : "Извлечь"}
         </button>
       </section>
 
       {/* 2. Extracted Source */}
       {showExtracted && editedSource && (
         <section className="rounded-xl border border-white/8 bg-white/[0.02] p-4">
-          {sectionTitle("2. Extracted Source")}
+          {sectionTitle("2. Извлечённый материал")}
           <div className="mt-3 grid gap-2 text-sm text-white/60">
             <p>
-              <span className="text-white/40">File name:</span>{" "}
+              <span className="text-white/40">Файл:</span>{" "}
               {editedSource.fileName}
             </p>
             <p>
-              <span className="text-white/40">File type:</span>{" "}
+              <span className="text-white/40">Тип:</span>{" "}
               {editedSource.fileType}
             </p>
           </div>
@@ -385,7 +385,7 @@ export function SourceRewriterPipeline() {
             </ul>
           )}
           <label className="mt-4 block text-xs text-white/45">
-            Full raw text
+            Полный текст
             <textarea
               className={`${fieldClass()} min-h-[140px] font-mono text-xs`}
               value={editedSource.fullRawText}
@@ -399,7 +399,7 @@ export function SourceRewriterPipeline() {
           </label>
           {editedSource.transcript !== undefined && (
             <label className="mt-3 block text-xs text-white/45">
-              Transcript
+              Транскрипт
               <textarea
                 className={`${fieldClass()} min-h-[100px] font-mono text-xs`}
                 value={editedSource.transcript ?? ""}
@@ -415,10 +415,10 @@ export function SourceRewriterPipeline() {
           {editedSource.pages?.map((page, pi) => (
             <div key={page.pageNumber} className="mt-6 border-t border-white/6 pt-4">
               <p className="text-sm font-semibold text-white">
-                PAGE {page.pageNumber}
+                СТРАНИЦА {page.pageNumber}
               </p>
               <label className="mt-2 block text-xs text-white/45">
-                raw text
+                исходный текст
                 <textarea
                   className={`${fieldClass()} min-h-[100px]`}
                   value={page.rawText}
@@ -434,7 +434,7 @@ export function SourceRewriterPipeline() {
               {page.visualAssets.map((a, ai) => (
                 <div key={a.id} className="mt-3">
                   <VisualAssetFields
-                    prefix={`VISUAL ASSET — page ${page.pageNumber} #${ai + 1}`}
+                    prefix={`ВИЗУАЛ — страница ${page.pageNumber} #${ai + 1}`}
                     asset={a}
                     onChange={(next) =>
                       setEdited((prev) => {
@@ -456,10 +456,10 @@ export function SourceRewriterPipeline() {
               className="mt-6 border-t border-white/6 pt-4"
             >
               <p className="text-sm font-semibold text-white">
-                SLIDE {slide.slideNumber}
+                СЛАЙД {slide.slideNumber}
               </p>
               <label className="mt-2 block text-xs text-white/45">
-                raw text
+                исходный текст
                 <textarea
                   className={`${fieldClass()} min-h-[100px]`}
                   value={slide.rawText}
@@ -473,7 +473,7 @@ export function SourceRewriterPipeline() {
                 />
               </label>
               <label className="mt-2 block text-xs text-white/45">
-                layout notes
+                заметки по макету
                 <textarea
                   className={`${fieldClass()} min-h-[72px]`}
                   value={slide.layoutNotes}
@@ -492,7 +492,7 @@ export function SourceRewriterPipeline() {
               {slide.visualAssets.map((a, ai) => (
                 <div key={a.id} className="mt-3">
                   <VisualAssetFields
-                    prefix={`VISUAL ASSET — slide ${slide.slideNumber} #${ai + 1}`}
+                    prefix={`ВИЗУАЛ — слайд ${slide.slideNumber} #${ai + 1}`}
                     asset={a}
                     onChange={(next) =>
                       setEdited((prev) => {
@@ -513,7 +513,7 @@ export function SourceRewriterPipeline() {
               {editedSource.visualAssets.map((a, vi) => (
                 <VisualAssetFields
                   key={a.id}
-                  prefix={`VISUAL ASSET ${vi + 1}`}
+                  prefix={`ВИЗУАЛ ${vi + 1}`}
                   asset={a}
                   onChange={(next) =>
                     setEdited((prev) => {
@@ -532,10 +532,10 @@ export function SourceRewriterPipeline() {
       {/* 3. Rewrite Settings */}
       {showExtracted && (
         <section className="rounded-xl border border-white/8 bg-white/[0.02] p-4">
-          {sectionTitle("3. Rewrite Settings")}
+          {sectionTitle("3. Настройки")}
           <div className="mt-4 grid gap-4 md:grid-cols-2">
             <label className="block text-xs text-white/45">
-              Rewrite mode
+              Режим
               <select
                 className={fieldClass()}
                 value={settings.rewriteMode}
@@ -554,7 +554,7 @@ export function SourceRewriterPipeline() {
               </select>
             </label>
             <label className="block text-xs text-white/45">
-              Output length
+              Объём результата
               <select
                 className={fieldClass()}
                 value={settings.outputLength}
@@ -573,7 +573,7 @@ export function SourceRewriterPipeline() {
               </select>
             </label>
             <label className="block text-xs text-white/45">
-              Style intensity
+              Интенсивность
               <select
                 className={fieldClass()}
                 value={settings.styleIntensity}
@@ -592,7 +592,7 @@ export function SourceRewriterPipeline() {
               </select>
             </label>
             <label className="block text-xs text-white/45">
-              Plagiarism safety
+              Уникализация
               <select
                 className={fieldClass()}
                 value={settings.plagiarismSafety}
@@ -620,7 +620,7 @@ export function SourceRewriterPipeline() {
             {status === "rewriting" && (
               <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
             )}
-            Rewrite source
+            {status === "rewriting" ? "Переписываю…" : "Переписать"}
           </button>
         </section>
       )}
@@ -628,9 +628,9 @@ export function SourceRewriterPipeline() {
       {/* 4. Rewritten Result */}
       {showRewritten && rewritten && (
         <section className="rounded-xl border border-white/8 bg-white/[0.02] p-4">
-          {sectionTitle("4. Rewritten Result")}
+          {sectionTitle("4. Результат")}
           <label className="mt-3 block text-xs text-white/45">
-            Full rewritten text
+            Переписанный текст
             <textarea
               className={`${fieldClass()} min-h-[160px]`}
               value={rewritten.fullRewrittenText}
@@ -644,10 +644,10 @@ export function SourceRewriterPipeline() {
           {rewritten.rewrittenPages?.map((p) => (
             <div key={p.pageNumber} className="mt-6 border-t border-white/6 pt-4">
               <p className="text-sm font-semibold text-white">
-                PAGE {p.pageNumber}
+                СТРАНИЦА {p.pageNumber}
               </p>
               <label className="mt-2 block text-xs text-white/45">
-                rewritten text
+                переписанный текст
                 <textarea
                   className={`${fieldClass()} min-h-[100px]`}
                   value={p.rewrittenText}
@@ -664,7 +664,7 @@ export function SourceRewriterPipeline() {
                   }
                 />
               </label>
-              <p className="mt-2 text-xs text-white/40">visual description preserved</p>
+              <p className="mt-2 text-xs text-white/40">визуальное описание сохранено</p>
               {p.visualAssets.map((a) => (
                 <div
                   key={a.id}
@@ -682,10 +682,10 @@ export function SourceRewriterPipeline() {
               className="mt-6 border-t border-white/6 pt-4"
             >
               <p className="text-sm font-semibold text-white">
-                SLIDE {s.slideNumber}
+                СЛАЙД {s.slideNumber}
               </p>
               <label className="mt-2 block text-xs text-white/45">
-                rewritten text
+                переписанный текст
                 <textarea
                   className={`${fieldClass()} min-h-[100px]`}
                   value={s.rewrittenText}
@@ -703,7 +703,7 @@ export function SourceRewriterPipeline() {
                 />
               </label>
               <p className="mt-1 text-xs text-white/40">
-                visual description preserved · layout notes: {s.layoutNotes || "—"}
+                визуальное описание сохранено · заметки: {s.layoutNotes || "—"}
               </p>
               {s.visualAssets.map((a) => (
                 <div
@@ -718,7 +718,7 @@ export function SourceRewriterPipeline() {
           ))}
           {rewritten.rewrittenTranscript !== undefined && (
             <label className="mt-4 block text-xs text-white/45">
-              Rewritten transcript
+              Переписанный транскрипт
               <textarea
                 className={`${fieldClass()} min-h-[100px]`}
                 value={rewritten.rewrittenTranscript ?? ""}
@@ -732,7 +732,7 @@ export function SourceRewriterPipeline() {
           )}
           {rewritten.notes.length > 0 && (
             <div className="mt-4">
-              <p className="text-xs text-white/45">Notes</p>
+              <p className="text-xs text-white/45">Заметки</p>
               <ul className="mt-1 list-inside list-disc text-sm text-white/70">
                 {rewritten.notes.map((n) => (
                   <li key={n}>{n}</li>
@@ -746,14 +746,14 @@ export function SourceRewriterPipeline() {
       {/* 5. Export */}
       {showRewritten && (
         <section className="rounded-xl border border-white/8 bg-white/[0.02] p-4">
-          {sectionTitle("5. Export")}
+          {sectionTitle("5. Экспорт")}
           <div className="mt-4 flex flex-wrap gap-2">
             <button
               type="button"
               onClick={copyAll}
               className="rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm text-white hover:bg-white/10"
             >
-              Copy all
+              Скопировать всё
             </button>
             <button
               type="button"
@@ -770,7 +770,7 @@ export function SourceRewriterPipeline() {
               }}
               className="rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm text-white hover:bg-white/10"
             >
-              Download .txt
+              Скачать .txt
             </button>
             <button
               type="button"
@@ -787,7 +787,7 @@ export function SourceRewriterPipeline() {
               }}
               className="rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm text-white hover:bg-white/10"
             >
-              Download .md
+              Скачать .md
             </button>
             <button
               type="button"
@@ -801,14 +801,14 @@ export function SourceRewriterPipeline() {
               }}
               className="rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm text-white hover:bg-white/10"
             >
-              Download structured JSON
+              Скачать JSON
             </button>
             <button
               type="button"
               onClick={resetAll}
               className="rounded-lg border border-red-400/25 bg-red-500/10 px-3 py-2 text-sm text-red-100/90 hover:bg-red-500/20"
             >
-              Reset
+              Сбросить
             </button>
           </div>
         </section>

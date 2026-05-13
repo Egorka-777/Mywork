@@ -13,7 +13,7 @@ export function SourceRewriterPanel({ onClose }: { onClose: () => void }) {
         <div className="flex items-center justify-between border-b border-white/6 px-4 py-3 md:px-5">
           <div>
             <h2 className="font-sans text-lg font-semibold text-white">
-              Source Rewriter
+              Рерайтер
             </h2>
             <p className="text-xs text-white/40">
               Извлечение текста, транскриптов и визуальных описаний с последующим
