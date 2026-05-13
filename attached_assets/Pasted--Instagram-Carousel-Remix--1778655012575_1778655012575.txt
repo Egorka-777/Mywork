@@ -1,0 +1,962 @@
+КОРОТКАЯ СУТЬ ЗАДАЧИ
+
+Нужно доработать уже существующую плитку Instagram Carousel Remix, не создавая новый пайплайн и не ломая текущее рабочее пространство.
+
+Новая логика такая:
+
+Instagram URL
+→ import через Apify
+→ AI analysis
+→ rewrite
+→ сборка готового ТЗ / prompt pack для ChatGPT
+→ ты вручную идёшь в ChatGPT, прикладываешь style reference и вставляешь prompt
+→ получаешь готовые слайды
+→ загружаешь готовые слайды обратно в приложение
+→ приложение публикует карусель в Instagram
+
+NanoBanana / fal.ai из основного пользовательского flow убираем.
+Генерацию картинок внутри приложения не делаем.
+Основная генерация теперь ручная через твой оплаченный ChatGPT.
+
+2. ЧТО ТЫ ИМЕЕШЬ В ВИДУ НА ЧЕЛОВЕЧЕСКОМ ЯЗЫКЕ
+
+Ты уже сделал важную часть:
+
+импорт карусели;
+анализ слайдов;
+OCR;
+видишь, что на слайдах написано.
+
+Теперь тебе не нужен дорогой автогенератор изображений внутри сервиса.
+
+Тебе нужен инструмент, который:
+
+вытаскивает структуру чужой карусели;
+переписывает текст;
+собирает готовое, сильное ТЗ для ChatGPT;
+даёт его тебе в удобном виде: копировать / скачать;
+потом принимает уже готовые изображения, которые ты сделал вручную в ChatGPT;
+и публикует их в Instagram-карусель.
+
+То есть приложение превращается из “AI image generator” в “carousel remix + prompt builder + publisher”.
+
+3. КОРНЕВАЯ ЦЕЛЬ ЗАДАЧИ
+
+Сделать из текущего Instagram Carousel Remix рабочий production-friendly инструмент, где:
+
+импорт работает как сейчас;
+анализ становится умнее;
+rewrite остаётся;
+вместо встроенной генерации изображений появляется Prompt Pack для ChatGPT;
+после ручной генерации появляется загрузка готовых слайдов;
+затем появляется официальная публикация карусели в Instagram.
+4. ЧТО ИМЕННО ДОЛЖЕН СДЕЛАТЬ CURSOR
+Общий принцип
+
+Ничего нового архитектурно не плодить без необходимости.
+Не создавать новый tile, новый panel, новый pipeline, новый модальный сценарий.
+
+Работаем в уже существующей плитке Instagram Carousel Remix.
+
+План по проходам
+ПРОХОД 1 — ДОРАБОТАТЬ ТЕКУЩИЙ PIPELINE ПОД PROMPT MODE
+Цель прохода
+
+Убрать из пользовательского flow автогенерацию картинок через fal.ai и заменить её на готовый Prompt Pack для ChatGPT.
+
+Что должно получиться
+
+После Import → Analyze → Rewrite пользователь получает:
+
+rewritten caption
+готовый master prompt
+готовый slide-by-slide prompt block
+кнопки:
+Copy GPT prompt
+Download prompt pack .txt
+ПРОХОД 2 — ДОБАВИТЬ STYLE REFERENCE И УМНЫЕ ОПИСАНИЯ СЛАЙДОВ
+Цель прохода
+
+Перед сборкой prompt pack пользователь должен иметь возможность загрузить референс стиля, а анализ должен выдавать не только OCR, но и что именно визуально нужно показать на слайде:
+
+скриншот;
+иконки;
+логотипы;
+человек;
+сервисы;
+список инструментов;
+CTA;
+и так далее.
+ПРОХОД 3 — ДОБАВИТЬ ОБРАТНУЮ ЗАГРУЗКУ ГОТОВЫХ СЛАЙДОВ
+Цель прохода
+
+После того как пользователь вручную сгенерировал слайды в ChatGPT, он должен загрузить их обратно в сервис.
+
+Нужен блок:
+
+Upload final carousel slides
+
+Туда пользователь загружает уже готовые изображения.
+
+ПРОХОД 4 — ДОБАВИТЬ INSTAGRAM PUBLISH
+Цель прохода
+
+После загрузки готовых слайдов приложение должно уметь:
+
+загрузить файлы в публичное storage;
+получить публичные https URLs;
+создать child containers в Instagram API;
+создать carousel container;
+вызвать media_publish;
+вернуть статус публикации и permalink.
+
+Это единственный слой, который добавить придётся обязательно, потому что Instagram publishing требует публично доступные image URLs, а не просто локальные файлы. Это подтверждается официальным flow Meta/Postman для /media и carousel publishing. 【turn142721search1】【turn142721search3】
+
+5. КАКИЕ СЛОИ ОБЯЗАТЕЛЬНО ПРОВЕРИТЬ
+FRONTEND
+
+Проверить:
+
+artifacts/workbench/src/App.tsx
+artifacts/workbench/src/CarouselRemixPanel.tsx
+artifacts/workbench/src/CarouselRemixPipeline.tsx
+BACKEND
+
+Проверить:
+
+artifacts/workbench/server/index.ts
+PACKAGE / DEPENDENCIES
+
+Проверить:
+
+artifacts/workbench/package.json
+НЕ ТРОГАТЬ
+
+Жёстко не трогать:
+
+artifacts/workbench/src/FreedzPanel.tsx
+artifacts/workbench/src/FreedzPipeline.tsx
+artifacts/workbench/src/TrackerTile.tsx
+telegram-rewriter/*
+lib/*
+artifacts/api-server/*
+6. ТОЧНЫЕ ТРЕБОВАНИЯ К ДОРАБОТКЕ
+6.1. НЕ СОЗДАВАТЬ НОВЫЙ PIPELINE
+Нужно:
+
+Изменять уже существующий:
+
+artifacts/workbench/src/CarouselRemixPipeline.tsx
+Нельзя:
+создавать CarouselPromptBuilderPipeline.tsx
+создавать второй panel
+создавать второй модальный флоу
+дублировать текущий pipeline
+6.2. СОХРАНИТЬ ТЕКУЩИЕ БЛОКИ, НО ИЗМЕНИТЬ ИХ СМЫСЛ
+Текущий flow:
+Source
+Imported slides
+AI analysis
+Rewrite
+Generate
+Целевой flow:
+Source
+Imported slides
+AI analysis
+Rewrite
+GPT Prompt Pack
+Final Slides Upload
+Publish to Instagram
+6.3. SOURCE BLOCK — ЧТО ДОБАВИТЬ
+
+В существующий Source block добавить:
+
+Новые поля:
+Style reference images
+input type="file" multiple accept="image/png,image/jpeg,image/webp"
+минимум 0, максимум 5 файлов
+эти файлы не анализировать LLM
+просто хранить локально и показывать preview
+Optional style notes
+textarea
+сюда пользователь может при желании дописать свои короткие замечания по стилю
+если пусто, ничего страшного
+Оставить как есть:
+Instagram URL
+Caption
+Import from Instagram
+manual slide upload fallback
+6.4. AI ANALYSIS BLOCK — СДЕЛАТЬ БОЛЕЕ ПРИГОДНЫМ ДЛЯ CHATGPT PROMPT
+
+Сейчас анализ даёт OCR и visual description. Этого недостаточно.
+
+Нужно расширить структуру анализа.
+
+В SlideAnalysis добавить поля:
+type SlideAnalysis = {
+  slideIndex: number;
+  sourceImageUrl: string | null;
+  originalText: string;
+  rewrittenText: string;
+  visualDescription: string;
+  hasFace: boolean;
+  hasScreenshot: boolean;
+  hasText: boolean;
+
+  slideRole: "cover" | "content" | "cta" | "unknown";
+
+  mentionedPeople: string[];
+  mentionedBrands: string[];
+  mentionedTools: string[];
+  mentionedPlatforms: string[];
+
+  visualElements: string[];
+  screenshotDescription: string;
+  promptVisualHints: string[];
+
+  preserveNotes: string[];
+  generatedImageUrl: string | null;
+  error: string | null;
+};
+Что должен возвращать AI analysis по каждому слайду
+
+По каждому слайду analysis обязан вернуть:
+
+slideRole
+cover
+content
+cta
+unknown
+mentionedPeople
+например: ["Elon Musk"]
+mentionedBrands
+например: ["ChatGPT", "Claude", "ElevenLabs"]
+mentionedTools
+если речь про сервисы / нейросети / сайты
+mentionedPlatforms
+например: ["Instagram", "TikTok"]
+visualElements
+например:
+["portrait"]
+["logo-list"]
+["screenshot"]
+["text-only"]
+["cta-layout"]
+screenshotDescription
+если hasScreenshot=true, текстом:
+"Screenshot of a tools list with logos and short descriptions"
+или "Screenshot of analytics dashboard"
+если скриншота нет — пустая строка
+promptVisualHints
+короткие подсказки для ChatGPT
+например:
+"Use portrait of Elon Musk as main visual anchor"
+"Add app icons/logos for each tool name"
+"Layout should be list-based and highly readable"
+6.5. REWRITE BLOCK — ДОБАВИТЬ REWRITTEN CAPTION
+
+Сейчас rewrite должен не только переписывать слайды, но и возвращать:
+
+rewrittenCaption: string
+В UI после Rewrite показывать:
+Rewritten Caption
+Rewritten Slide Text по каждому слайду
+Пользователь должен иметь возможность вручную править:
+rewritten caption
+rewrittenText каждого слайда
+6.6. BLOCK 5 — ПОЛНОСТЬЮ ПЕРЕДЕЛАТЬ Generate В GPT Prompt Pack
+Что сделать
+
+Текущий блок Generate carousel images не удалять архитектурно, а заменить его функционально.
+
+Было:
+кнопка Generate carousel images
+вызов fal.ai
+Должно стать:
+заголовок блока GPT Prompt Pack
+кнопка Build GPT Prompt
+readonly textarea / code block с итоговым prompt
+кнопки:
+Copy GPT prompt
+Download .txt
+6.7. PROMPT НЕ ГЕНЕРИРОВАТЬ ОТДЕЛЬНЫМ ENDPOINT, А СОБИРАТЬ ДЕТЕРМИНИСТИЧЕСКИ НА FRONTEND
+Почему
+
+Чтобы не плодить новые серверные слои без необходимости.
+
+Правильный подход
+
+После Analyze + Rewrite frontend сам вызывает helper:
+
+buildGptPromptPack(...)
+
+Он собирает prompt из:
+
+фиксированного шаблона пользователя;
+количества слайдов;
+rewrite-данных;
+slide descriptions;
+visual hints;
+style notes.
+6.8. ИСПОЛЬЗОВАТЬ В PROMPT PACK ТОЧНО ТВОЙ ШАБЛОН
+
+Шаблон, который ты прислал, должен быть использован буквально.
+
+Нельзя:
+переписывать его “по-своему”
+сокращать
+выбрасывать блоки
+менять смысл правил
+Нужно:
+
+Использовать его как base template.
+
+6.9. КАК ЗАМЕНЯТЬ ПЛЕЙСХОЛДЕРЫ В ТВОЁМ ШАБЛОНЕ
+[КОЛИЧЕСТВО_СЛАЙДОВ]
+
+заменить на:
+
+analyses.length
+[ВСТАВЬ СЮДА ОПИСАНИЕ СЛАЙДОВ И ТЕКСТ]
+
+вставлять не сырой JSON, а аккуратный читабельный блок.
+
+Формат строго такой:
+
+SLIDE 1
+ROLE: COVER
+ORIGINAL STRUCTURE: portrait + headline
+TEXT FOR SLIDE:
+<rewrittenText>
+
+VISUAL DESCRIPTION:
+<visualDescription>
+
+VISUAL ELEMENTS:
+- portrait
+- bold headline
+- slide number
+
+PEOPLE:
+- Elon Musk
+
+BRANDS / TOOLS / PLATFORMS:
+- none
+
+SCREENSHOT:
+- no
+
+CHATGPT VISUAL NOTES:
+- Use a strong editorial cover composition
+- Make the headline the main focus
+- Use a portrait of Elon Musk as the main visual anchor
+
+Если слайд содержит скриншот, формат должен быть таким:
+
+SLIDE 2
+ROLE: CONTENT
+ORIGINAL STRUCTURE: list of tools with logos
+TEXT FOR SLIDE:
+<rewrittenText>
+
+VISUAL DESCRIPTION:
+<visualDescription>
+
+VISUAL ELEMENTS:
+- screenshot
+- logo list
+- text blocks
+
+PEOPLE:
+- none
+
+BRANDS / TOOLS / PLATFORMS:
+- ChatGPT
+- Claude
+- ElevenLabs
+- HeyGen
+
+SCREENSHOT:
+- yes
+- Screenshot description: <screenshotDescription>
+
+CHATGPT VISUAL NOTES:
+- Add logos/icons for each mentioned tool
+- If a screenshot is present, visually include a screenshot-like block or UI-style insert
+- Keep the slide readable and structured as a clean tool list
+6.10. STYLE REFERENCE НЕ АНАЛИЗИРОВАТЬ LLM
+Нужно:
+
+Style reference просто:
+
+загружать;
+показывать preview;
+при download prompt pack добавить примечание:
+Стиль карусели: как на прикреплённом референсе.
+Нельзя:
+тратить токены на отдельный analysis style reference без необходимости
+6.11. СЛЕДУЮЩИЙ БЛОК — FINAL SLIDES UPLOAD
+
+Добавить новый UI block:
+
+Final Carousel Slides
+Внутри:
+input type="file" multiple accept="image/png,image/jpeg,image/webp"
+пользователь загружает туда уже готовые слайды, которые он получил в ChatGPT
+количество слайдов должно совпадать с analyses.length
+Валидация:
+
+Если количество загруженных final slides не совпадает с количеством слайдов карусели:
+показать ошибку:
+
+Uploaded final slides count must match imported carousel slide count.
+6.12. INSTAGRAM PUBLISH — НОВЫЙ ФИНАЛЬНЫЙ БЛОК
+
+Добавить block:
+
+Publish to Instagram
+Поля:
+Final caption — textarea
+по умолчанию туда подставляется rewrittenCaption
+пользователь может вручную редактировать
+Кнопка:
+Publish carousel
+Что происходит:
+final slides загружаются в public storage;
+backend получает public image URLs;
+backend создаёт Instagram child containers;
+backend создаёт carousel container;
+backend вызывает media_publish;
+backend возвращает:
+publish id
+status
+permalink если есть
+7. CURRENT / EXPECTED / FIX CRITERIA
+CURRENT
+
+Сейчас приложение:
+
+импортирует карусель;
+показывает imported slides;
+делает AI analysis;
+показывает OCR;
+имеет rewrite;
+дальше ориентировано на image generation внутри приложения.
+EXPECTED
+
+Приложение должно:
+
+импортировать карусель;
+анализировать её с более умной структурой;
+переписывать тексты и caption;
+строить готовое ТЗ для ChatGPT;
+позволять его копировать / скачивать;
+принимать обратно готовые слайды;
+публиковать их в Instagram.
+FIX CRITERIA
+
+Считаем задачу исправленной, если:
+
+пользователь может импортировать Instagram-карусель;
+пользователь видит OCR + visual analysis;
+пользователь нажимает Rewrite;
+получает:
+rewrittenCaption
+rewrittenText по каждому слайду
+пользователь нажимает Build GPT Prompt;
+получает полный готовый prompt по твоему шаблону;
+может:
+скопировать prompt
+скачать .txt
+после ручной генерации может загрузить final slides;
+может нажать Publish carousel;
+backend официально публикует карусель.
+8. USER FLOW / DATA FLOW / RENDERING
+USER FLOW
+Шаг 1
+
+Пользователь вставляет Instagram URL.
+
+Шаг 2
+
+Нажимает Import from Instagram.
+
+Шаг 3
+
+Видит caption и imported slides.
+
+Шаг 4
+
+Загружает style reference images.
+
+Шаг 5
+
+Нажимает Analyze carousel.
+
+Шаг 6
+
+Видит по каждому слайду:
+
+OCR
+visual description
+screenshot / tools / people / logos hints
+Шаг 7
+
+Нажимает Rewrite carousel text.
+
+Шаг 8
+
+Получает:
+
+rewritten caption
+rewritten slide texts
+Шаг 9
+
+Нажимает Build GPT Prompt.
+
+Шаг 10
+
+Копирует prompt, идёт в ChatGPT, прикладывает style references вручную, получает слайды.
+
+Шаг 11
+
+Возвращается в сервис и загружает final images.
+
+Шаг 12
+
+Нажимает Publish carousel.
+
+DATA FLOW
+Instagram URL
+→ /wb/carousel/import-instagram
+→ importedSlides + caption
+
+importedSlides
+→ /wb/carousel/analyze
+→ SlideAnalysis[]
+
+SlideAnalysis[] + caption
+→ /wb/carousel/rewrite
+→ rewritten slides + rewritten caption
+
+rewritten data + analyses + user prompt template
+→ frontend buildGptPromptPack()
+→ masterPrompt string + downloadable txt
+
+user final images
+→ /wb/carousel/upload-final-assets
+→ public https URLs
+
+public URLs + final caption
+→ /wb/carousel/publish-instagram
+→ published result
+RENDERING
+
+Новые блоки в существующем pipeline:
+
+Source
+Imported Slides
+AI Analysis
+Rewrite
+GPT Prompt Pack
+Final Carousel Slides
+Publish to Instagram
+9. ТРЕБОВАНИЕ К КАЧЕСТВУ РЕАЛИЗАЦИИ
+Не дублировать pipeline.
+Не создавать лишние endpoints, если это можно собрать на frontend.
+Не использовать fal.ai в основном flow.
+Не удалять старые рабочие части без необходимости.
+Не ломать import/analyze/rewrite.
+Prompt pack должен собираться детерминированно, а не “как LLM решит”.
+Шаблон prompt должен быть ровно по тексту пользователя.
+Publish flow должен быть официальным через Instagram API.
+Если official publish ещё не готов, блок publish должен быть feature-flagged и не ломать остальной flow.
+10. ЧТО CURSOR ДОЛЖЕН ВЫДАТЬ В ОТВЕТ
+
+Cursor должен вернуть:
+
+список изменённых файлов;
+список новых файлов, если они действительно понадобились;
+список файлов, которые он не трогал;
+какие state fields добавил;
+какие endpoints изменил;
+какие endpoints добавил;
+что удалил из user flow;
+команды проверки;
+результат ручной проверки;
+ограничения publish flow.
+11. ТЕСТ-ПЛАН
+TEST 1 — IMPORT
+Вставить Instagram URL.
+Нажать Import from Instagram.
+Проверить:
+caption заполнен;
+imported slides отображаются;
+count корректный.
+TEST 2 — STYLE REFERENCE
+Загрузить 1–3 style reference images.
+Проверить:
+preview отображаются;
+файлы не уходят в LLM analysis;
+UI не падает.
+TEST 3 — ANALYZE
+Нажать Analyze carousel.
+Проверить по каждому слайду:
+есть OCR;
+есть visual description;
+есть slideRole;
+есть screenshotDescription, если есть screenshot;
+есть brands/tools/people arrays.
+TEST 4 — REWRITE
+Нажать Rewrite carousel text.
+Проверить:
+есть rewrittenCaption;
+есть rewrittenText у каждого слайда;
+пользователь может вручную редактировать их.
+TEST 5 — PROMPT PACK
+Нажать Build GPT Prompt.
+Проверить:
+[КОЛИЧЕСТВО_СЛАЙДОВ] заменён на реальное число;
+prompt содержит все слайды;
+prompt содержит screenshot notes, где нужно;
+prompt содержит people / tools / logo hints;
+есть кнопка copy;
+есть download .txt.
+TEST 6 — FINAL SLIDES UPLOAD
+Загрузить готовые final slides.
+Проверить:
+count проверяется;
+mismatch count даёт ошибку;
+preview final slides отображаются.
+TEST 7 — PUBLISH
+Нажать Publish carousel.
+Проверить:
+файлы загружаются в public storage;
+backend получает image URLs;
+создаются child containers;
+создаётся carousel container;
+вызывается media_publish;
+возвращается publish result.
+12. КРИТЕРИЙ “ГОТОВО”
+
+Задача готова, если:
+
+в существующей плитке Instagram Carousel Remix
+без создания второго pipeline
+работает полный сценарий:
+Import
+→ Analyze
+→ Rewrite
+→ GPT Prompt Pack
+→ Upload Final Slides
+→ Publish to Instagram
+
+и при этом:
+
+prompt pack собирается по твоему шаблону;
+style reference просто прикладывается пользователем вручную;
+генерация изображений внутри приложения не используется;
+final publish работает через upload URLs + Instagram publish flow.
+13. ФИНАЛЬНЫЙ ГОТОВЫЙ БЛОК ДЛЯ CURSOR
+
+Ниже даю блок, который можно копировать Cursor’у.
+
+ЗАДАЧА:
+Доработать уже существующую плитку Instagram Carousel Remix под новый основной сценарий:
+Import → Analyze → Rewrite → GPT Prompt Pack → Upload Final Slides → Publish to Instagram.
+
+ВАЖНО:
+Не создавать новый tile.
+Не создавать новый panel.
+Не создавать новый pipeline.
+Не дублировать CarouselRemixPipeline.
+Работать только внутри уже существующего Instagram Carousel Remix flow.
+
+ГЛАВНАЯ ЦЕЛЬ:
+Убрать основной user flow с автогенерацией изображений через fal.ai.
+Вместо этого приложение должно собирать готовое ТЗ / Prompt Pack для ChatGPT, чтобы пользователь вручную генерировал слайды в своём оплачиваемом ChatGPT.
+После этого пользователь загружает готовые слайды обратно в приложение, а приложение публикует карусель в Instagram.
+
+ФАЙЛЫ, КОТОРЫЕ МОЖНО МЕНЯТЬ:
+1. artifacts/workbench/src/CarouselRemixPipeline.tsx
+2. artifacts/workbench/src/CarouselRemixPanel.tsx
+3. artifacts/workbench/server/index.ts
+4. artifacts/workbench/package.json
+5. artifacts/workbench/src/index.css — только если нужны минимальные стили для новых блоков
+6. artifacts/workbench/src/App.tsx — только если нужно подправить label/description существующей плитки, без изменения логики остальных плиток
+
+ФАЙЛЫ, КОТОРЫЕ НЕЛЬЗЯ ТРОГАТЬ:
+1. artifacts/workbench/src/FreedzPanel.tsx
+2. artifacts/workbench/src/FreedzPipeline.tsx
+3. artifacts/workbench/src/TrackerTile.tsx
+4. telegram-rewriter/*
+5. lib/*
+6. artifacts/api-server/*
+
+ЧТО НУЖНО СДЕЛАТЬ:
+
+1. Не создавать новый pipeline. Работать внутри существующего CarouselRemixPipeline.tsx.
+
+2. Сохранить текущие блоки:
+- Source
+- Imported Slides
+- AI Analysis
+- Rewrite
+
+3. Переделать user flow:
+БЫЛО:
+- Source
+- Imported Slides
+- AI Analysis
+- Rewrite
+- Generate carousel images
+
+ДОЛЖНО СТАТЬ:
+- Source
+- Imported Slides
+- AI Analysis
+- Rewrite
+- GPT Prompt Pack
+- Final Carousel Slides
+- Publish to Instagram
+
+4. В Source block добавить:
+- Style reference images: input type="file" multiple accept="image/png,image/jpeg,image/webp"
+- Optional style notes: textarea
+
+ВАЖНО:
+Style reference images не отправлять в LLM analysis.
+Они нужны только как пользовательский reference для ручной генерации в ChatGPT.
+
+5. Расширить SlideAnalysis:
+
+type SlideAnalysis = {
+  slideIndex: number;
+  sourceImageUrl: string | null;
+  originalText: string;
+  rewrittenText: string;
+  visualDescription: string;
+  hasFace: boolean;
+  hasScreenshot: boolean;
+  hasText: boolean;
+  slideRole: "cover" | "content" | "cta" | "unknown";
+  mentionedPeople: string[];
+  mentionedBrands: string[];
+  mentionedTools: string[];
+  mentionedPlatforms: string[];
+  visualElements: string[];
+  screenshotDescription: string;
+  promptVisualHints: string[];
+  preserveNotes: string[];
+  generatedImageUrl: string | null;
+  error: string | null;
+};
+
+6. Обновить endpoint /wb/carousel/analyze:
+Он должен возвращать не только OCR и description, но и:
+- slideRole
+- mentionedPeople
+- mentionedBrands
+- mentionedTools
+- mentionedPlatforms
+- visualElements
+- screenshotDescription
+- promptVisualHints
+
+7. Обновить endpoint /wb/carousel/rewrite:
+Он должен возвращать:
+- rewrittenCaption: string
+- slides[].rewrittenText
+
+ВАЖНО:
+rewrittenCaption должен отображаться в UI и быть редактируемым.
+
+8. Убрать основной вызов fal.ai из пользовательского flow.
+Если endpoint /wb/carousel/generate уже существует, можно оставить его в backend нетронутым, но UI не должен использовать его как основной сценарий.
+Главный сценарий больше не генерирует картинки внутри приложения.
+
+9. Блок Generate заменить на GPT Prompt Pack.
+
+Вместо старого блока сделать новый раздел:
+- заголовок: GPT Prompt Pack
+- кнопка: Build GPT Prompt
+- readonly textarea или code block с итоговым prompt
+- кнопка: Copy GPT prompt
+- кнопка: Download prompt pack .txt
+
+10. Prompt pack не собирать через новый backend endpoint.
+Собрать его на frontend детерминированно через helper, например:
+buildGptPromptPack()
+
+11. Для сборки prompt использовать ТОЧНО следующий пользовательский шаблон, не переписывать и не сокращать его:
+
+Создай мне карусель из [КОЛИЧЕСТВО_СЛАЙДОВ] слайдов.
+
+Стиль карусели: как на прикреплённом референсе.
+
+Используй референс как основу для визуального направления:
+- премиальный editorial-дизайн;
+- строгая сетка;
+- крупная жирная типографика;
+- высокий контраст;
+- чёрный / белый / синий как основные цвета;
+- минимализм, воздух, аккуратные линии, разделители, номера слайдов;
+- современный personal brand / экспертный стиль;
+- визуально слайды должны выглядеть как единая серия, а не как разные картинки.
+
+ВАЖНО ПО ВИЗУАЛИЗАЦИИ:
+Если в тексте слайда упоминаются:
+- нейросети;
+- сервисы;
+- сайты;
+- приложения;
+- компании;
+- бренды;
+- известные люди;
+- платформы;
+- технологии;
+
+то обязательно добавь визуальные элементы по этим названиям:
+- для сервисов, сайтов, приложений и нейросетей: логотипы, иконки, app icons или стилизованные узнаваемые символы;
+- для известных людей: портрет / лицо / силуэт / визуальный образ человека;
+- для брендов и компаний: логотип или фирменный визуальный знак;
+- если точный логотип нельзя использовать или он плохо читается, сделай минималистичную стилизованную иконку рядом с названием;
+- визуал должен помогать понять смысл, а не быть декором ради декора.
+
+ОБЩИЕ ПРАВИЛА:
+- Формат каждого слайда: вертикальный Instagram carousel, 4:5.
+- Каждый слайд должен быть отдельным полноценным изображением.
+- Все слайды должны быть в одном стиле.
+- Сохраняй точный смысл текста.
+- Не добавляй лишние факты, которых нет в исходном тексте.
+- Не меняй названия сервисов, брендов и людей.
+- Не сокращай важные названия.
+- Если текста много, аккуратно структурируй его в блоки, списки, карточки или колонки.
+- Если на слайде список инструментов, сделай его читаемым: номер, иконка/логотип, название, короткое описание.
+- Если слайд является обложкой, сделай его максимально цепляющим: крупный заголовок -хук, который воспринимается так, будто это раскрывается какой то секрет, и сейчас будешь мясо полезной информации, или какая то жесткая польза будет, сильный визуальный образ, минимум лишнего.
+- Если слайд является финальным CTA, сделай его максимально понятным и конверсионным: крупный вопрос/обещание, действие, ключевое слово для комментария.
+- Используй синий цвет для смысловых акцентов: цифры, ключевые слова, CTA, номера слайдов.
+- Не перегружай слайды мелким текстом.
+- Текст должен быть крупным, читаемым и аккуратно выровненным.
+- Не делай мультяшный, детский или шаблонный дизайн.
+- Не используй случайные декоративные элементы.
+- Не делай дизайн в стиле презентации PowerPoint.
+- Не делай кислотные цвета.
+- Не делай дешёвые 3D-эффекты.
+- Не добавляй водяные знаки.
+
+ДАННЫЕ ДЛЯ СЛАЙДОВ:
+[ВСТАВЬ СЮДА ОПИСАНИЕ СЛАЙДОВ И ТЕКСТ]
+
+12. Placeholder replacement rules:
+- [КОЛИЧЕСТВО_СЛАЙДОВ] → analyses.length
+- [ВСТАВЬ СЮДА ОПИСАНИЕ СЛАЙДОВ И ТЕКСТ] → заменить на читабельный slide-by-slide block
+
+Для каждого слайда форматировать данные так:
+
+SLIDE N
+ROLE: <cover/content/cta/unknown>
+ORIGINAL STRUCTURE: <short structural note>
+TEXT FOR SLIDE:
+<rewrittenText>
+
+VISUAL DESCRIPTION:
+<visualDescription>
+
+VISUAL ELEMENTS:
+- <element 1>
+- <element 2>
+
+PEOPLE:
+- <name or none>
+
+BRANDS / TOOLS / PLATFORMS:
+- <entity 1>
+- <entity 2>
+
+SCREENSHOT:
+- yes/no
+- Screenshot description: <description if any>
+
+CHATGPT VISUAL NOTES:
+- <hint 1>
+- <hint 2>
+
+13. Добавить Final Carousel Slides block:
+- input type="file" multiple accept="image/png,image/jpeg,image/webp"
+- preview uploaded files
+- validation: uploaded files count must equal analyses.length
+- если count mismatch, показывать:
+  "Uploaded final slides count must match imported carousel slide count."
+
+14. Добавить Publish to Instagram block:
+- textarea Final caption
+- по умолчанию туда подставлять rewrittenCaption
+- кнопка Publish carousel
+
+15. Для publish flow добавить backend endpoints:
+A. POST /wb/carousel/upload-final-assets
+- принимает final slide files
+- загружает в public storage
+- возвращает public https URLs
+
+B. POST /wb/carousel/publish-instagram
+- принимает:
+  {
+    caption: string,
+    imageUrls: string[]
+  }
+- создаёт child containers
+- создаёт carousel container
+- вызывает media_publish
+- возвращает publish result
+
+16. Если storage слоя ещё нет, добавить только минимально достаточный:
+- любой один public storage provider
+- не делать из этого новую большую подсистему
+- задача storage: получить public https URLs для final slide files
+
+17. В UI publish block должен быть disabled если:
+- final slide files не загружены
+- final slide files count не совпадает
+- caption пустой
+
+18. Не создавать отдельный backend endpoint для prompt pack.
+Собрать prompt pack на frontend.
+
+19. Не использовать fal.ai как основной сценарий.
+20. Не ломать import/analyze/rewrite.
+
+ЧТО НУЖНО ВЫДАТЬ В ОТЧЁТЕ:
+1. Список изменённых файлов
+2. Список новых файлов
+3. Какие файлы не трогал
+4. Какие поля добавил в SlideAnalysis и state
+5. Какие endpoints изменил
+6. Какие endpoints добавил
+7. Как реализован buildGptPromptPack()
+8. Как реализован upload final slides
+9. Как реализован publish flow
+10. Команды проверки
+11. Результат ручной проверки UI
+12. Ограничения
+
+ОБЯЗАТЕЛЬНАЯ ПРОВЕРКА:
+1. Import works
+2. Analyze works
+3. Rewrite works
+4. Prompt pack builds correctly
+5. Copy works
+6. Download .txt works
+7. Final slides upload works
+8. Publish flow works or returns controlled errors
+9. Existing Telegram / Threads tiles are not broken
+
+КОМАНДЫ ПРОВЕРКИ:
+pnpm --filter @workspace/workbench run typecheck
+pnpm --filter @workspace/workbench run build
+
+КРИТЕРИЙ ГОТОВО:
+Существующий Instagram Carousel Remix pipeline работает по сценарию:
+Import → Analyze → Rewrite → GPT Prompt Pack → Upload Final Slides → Publish to Instagram
+без дублирования пайплайнов и без использования встроенной image generation как основного пути.
