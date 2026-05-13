@@ -404,9 +404,31 @@ async def check_channel(client: TelegramClient, state: dict, channel: str) -> No
         await asyncio.sleep(2)
 
 
+async def _mark_remaining_channels(client: TelegramClient, state: dict, remaining: list[str]) -> dict:
+    """При прерывании bootstrap — запоминаем last_id для непройденных каналов без отправки."""
+    for ch in remaining:
+        ch_key = ch.lstrip("@").lower()
+        if state.get(ch_key, 0) > 0:
+            continue
+        try:
+            msgs = await client.get_messages(ch, limit=1)
+            if msgs:
+                state[ch_key] = msgs[0].id
+                log.info(f"[{ch}] Marked last_id={msgs[0].id} (bootstrap interrupted)")
+        except Exception as e:
+            log.warning(f"[{ch}] Could not fetch last_id on interrupt: {e}")
+    return state
+
+
 async def bootstrap(client: TelegramClient, state: dict) -> dict:
     log.info(f"Bootstrap: sending last {INITIAL_POSTS_PER_CHANNEL} posts from each channel...")
-    for channel in SOURCE_CHANNELS:
+    for idx, channel in enumerate(SOURCE_CHANNELS):
+        if not is_tracker_enabled():
+            log.info("Bootstrap прерван: tracker выключен рубильником.")
+            state = await _mark_remaining_channels(client, state, SOURCE_CHANNELS[idx:])
+            state = mark_bootstrap_done(state)
+            save_state(state)
+            return state
         try:
             channel_key = channel.lstrip("@").lower()
             messages = await client.get_messages(channel, limit=INITIAL_POSTS_PER_CHANNEL)
@@ -417,6 +439,14 @@ async def bootstrap(client: TelegramClient, state: dict) -> dict:
             to_process = sorted(messages, key=lambda m: m.id)
 
             for message in to_process:
+                if not is_tracker_enabled():
+                    log.info("Bootstrap прерван: tracker выключен рубильником.")
+                    state[channel_key] = max(state.get(channel_key, 0), message.id)
+                    state = await _mark_remaining_channels(client, state, SOURCE_CHANNELS[idx + 1:])
+                    state = mark_bootstrap_done(state)
+                    save_state(state)
+                    return state
+
                 text = message.message or ""
                 has_media = message.media is not None
 
