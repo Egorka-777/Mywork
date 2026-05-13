@@ -370,9 +370,9 @@ export function CarouselRemixPipeline() {
           </p>
           <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-5">
             {s.importedSlides.map((sl) => (
-              <div key={sl.slideIndex} className="relative aspect-square overflow-hidden rounded-lg border border-white/8">
+              <div key={sl.slideIndex} className="relative aspect-square overflow-hidden rounded-lg border border-white/8 bg-white/[0.03]">
                 <img
-                  src={sl.imageUrl}
+                  src={`/wb/proxy-image?url=${encodeURIComponent(sl.imageUrl)}`}
                   alt={`Slide ${sl.slideIndex}`}
                   className="h-full w-full object-cover"
                   onError={(e) => {

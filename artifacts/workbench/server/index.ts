@@ -139,6 +139,31 @@ async function fileToFalUrl(file: Express.Multer.File) {
   return uploadBufferToFalUrl(file.buffer, file.mimetype);
 }
 
+// ─── image proxy ─────────────────────────────────────────────────────────────
+
+app.get("/wb/proxy-image", async (req, res) => {
+  const url = req.query.url as string | undefined;
+  if (!url || !/^https?:\/\//.test(url)) {
+    return res.status(400).send("Missing or invalid url param");
+  }
+  try {
+    const r = await fetch(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (compatible; bot/1.0)",
+        "Referer": "https://www.instagram.com/",
+      },
+    });
+    if (!r.ok) return res.status(r.status).send(`Upstream error: ${r.status}`);
+    const contentType = r.headers.get("content-type") || "image/jpeg";
+    const buffer = Buffer.from(await r.arrayBuffer());
+    res.set("Content-Type", contentType);
+    res.set("Cache-Control", "public, max-age=3600");
+    return res.send(buffer);
+  } catch (e) {
+    return res.status(502).send(String(e));
+  }
+});
+
 // ─── health ─────────────────────────────────────────────────────────────────
 
 app.get("/wb/health", (_req, res) => {
