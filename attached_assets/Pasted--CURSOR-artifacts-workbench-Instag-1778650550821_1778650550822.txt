@@ -1,0 +1,1031 @@
+ГОТОВОЕ ТЗ ДЛЯ CURSOR / АГЕНТА
+ЗАДАЧА:
+Добавить в artifacts/workbench новую отдельную плитку “Instagram Carousel Remix”.
+
+ВАЖНО:
+Не заменять текущую плитку “Threads — пост + картинка”.
+Не менять FreedzPanel.tsx.
+Не менять FreedzPipeline.tsx.
+Не менять TrackerTile.tsx.
+Не удалять существующие endpoints /wb/pipeline/*.
+Создать новую независимую плитку, новую модалку и новый пайплайн.
+
+ЦЕЛЬ:
+Пользователь вставляет ссылку на Instagram-карусель.
+Backend через Apify получает данные поста: caption и изображения слайдов.
+Frontend показывает импортированные слайды.
+Потом пользователь запускает AI-анализ каждого слайда, рерайт текста и генерацию новой карусели.
+
+ФАЙЛЫ, КОТОРЫЕ МОЖНО МЕНЯТЬ:
+1. artifacts/workbench/src/App.tsx
+2. artifacts/workbench/src/CarouselRemixPanel.tsx — создать новый файл
+3. artifacts/workbench/src/CarouselRemixPipeline.tsx — создать новый файл
+4. artifacts/workbench/server/index.ts
+5. artifacts/workbench/package.json
+6. artifacts/workbench/src/index.css — только если нужны общие классы, без изменения существующих классов
+
+ФАЙЛЫ, КОТОРЫЕ НЕЛЬЗЯ МЕНЯТЬ:
+1. artifacts/workbench/src/TrackerTile.tsx
+2. artifacts/workbench/src/FreedzPanel.tsx
+3. artifacts/workbench/src/FreedzPipeline.tsx
+4. artifacts/workbench/freedz-pipeline.json
+5. telegram-rewriter/*
+6. lib/*
+7. artifacts/api-server/*
+8. artifacts/mockup-sandbox/*
+9. artifacts/workbench/vite.config.ts
+
+ENV VARIABLES:
+Добавить backend-поддержку:
+
+APIFY_TOKEN
+APIFY_ACTOR_ID
+OPENROUTER_API_KEY
+OPENROUTER_TEXT_MODEL
+OPENROUTER_VISION_MODEL
+FAL_KEY
+
+APIFY_TOKEN нельзя использовать во frontend.
+APIFY_TOKEN нельзя возвращать в JSON.
+APIFY_TOKEN нельзя писать в console.log.
+APIFY_TOKEN используется только в server/index.ts.
+
+Если APIFY_ACTOR_ID содержит "/", заменить "/" на "~" только при сборке URL.
+Пример:
+"apify/instagram-scraper" → "apify~instagram-scraper"
+
+Если APIFY_ACTOR_ID уже содержит "~", оставить как есть.
+Если APIFY_ACTOR_ID выглядит как "shu8hvrXbJbY3Eb9W", оставить как есть.
+
+PACKAGE:
+В artifacts/workbench/package.json добавить dependencies:
+
+multer
+
+И devDependencies:
+
+@types/multer
+
+Команда:
+pnpm --filter @workspace/workbench add multer
+pnpm --filter @workspace/workbench add -D @types/multer
+5. ТОЧНЫЕ ПРАВКИ ПО FRONTEND
+5.1. App.tsx
+
+Открыть:
+
+artifacts/workbench/src/App.tsx
+
+Добавить импорт:
+
+import { CarouselRemixPanel } from "./CarouselRemixPanel";
+
+Добавить state рядом с openFreedz:
+
+const [openCarouselRemix, setOpenCarouselRemix] = useState(false);
+
+В grid после FreedzCard добавить новую карточку:
+
+<CarouselRemixCard
+  onOpen={() => setOpenCarouselRemix(true)}
+  open={openCarouselRemix}
+/>
+
+После блока {openFreedz && (...)} добавить:
+
+{openCarouselRemix && (
+  <CarouselRemixPanel onClose={() => setOpenCarouselRemix(false)} />
+)}
+
+В этом же файле ниже FreedzCard добавить новый компонент:
+
+function CarouselRemixCard({
+  onOpen,
+  open,
+}: {
+  onOpen: () => void;
+  open: boolean;
+}) {
+  return (
+    <div
+      className={`card-glass group relative flex flex-col overflow-hidden rounded-2xl p-5 transition [box-shadow:0_0_0_1px_rgba(91,141,239,0.1)] ${
+        open
+          ? "ring-1 ring-[#5b8def]/30"
+          : "hover:ring-1 hover:ring-[#5b8def]/20"
+      }`}
+    >
+      <div
+        className="absolute top-0 right-0 h-32 w-32 rounded-full opacity-20 blur-3xl"
+        style={{ background: "#5b8def" }}
+        aria-hidden
+      />
+
+      <div className="relative flex items-start justify-between gap-3">
+        <div>
+          <h2 className="font-sans text-lg font-semibold text-white">
+            Instagram Carousel Remix
+          </h2>
+          <p className="mt-1 text-sm text-[#6b6b7a]">
+            Ссылка Instagram → Apify → слайды + подпись → AI-разбор → рерайт → новая карусель.
+          </p>
+        </div>
+
+        <div className="hidden shrink-0 md:flex" aria-hidden>
+          <div className="flex flex-col gap-0.5">
+            <div className="h-1.5 w-1.5 rounded-full bg-white/20" />
+            <div className="h-1.5 w-1.5 rounded-full bg-white/20" />
+            <div className="h-1.5 w-1.5 rounded-full bg-white/20" />
+          </div>
+        </div>
+      </div>
+
+      <div className="relative mt-3 flex flex-wrap items-center gap-2 text-xs">
+        <span className="rounded-full border border-[#5b8def]/30 bg-[#5b8def]/10 px-2 py-0.5 text-[#5b8def]">
+          новая плитка
+        </span>
+        <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-white/50">
+          без замены текущих пайплайнов
+        </span>
+      </div>
+
+      <div className="relative mt-5 flex min-h-12 flex-1">
+        <div className="flex w-full items-center justify-between gap-2 rounded-xl border border-white/6 bg-white/[0.02] px-3 py-2">
+          <div className="flex flex-1 items-center gap-1.5 overflow-hidden text-white/30">
+            <Link2 className="h-3.5 w-3.5 shrink-0" />
+            <Database className="h-3.5 w-3.5 shrink-0" />
+            <Sparkles className="h-3.5 w-3.5 shrink-0" />
+            <ImageIcon className="h-3.5 w-3.5 shrink-0" />
+            <Send className="h-3.5 w-3.5 shrink-0" />
+          </div>
+        </div>
+      </div>
+
+      <button
+        type="button"
+        onClick={onOpen}
+        className="relative mt-4 w-full rounded-xl border border-[#5b8def]/25 bg-gradient-to-b from-[#17243a]/80 to-[#101927]/60 py-2.5 text-sm font-medium text-white transition hover:border-[#5b8def]/45 hover:from-[#1f3150]/80"
+      >
+        Открыть ремикс
+      </button>
+    </div>
+  );
+}
+6. НОВЫЙ ФАЙЛ CarouselRemixPanel.tsx
+
+Создать:
+
+artifacts/workbench/src/CarouselRemixPanel.tsx
+
+Код:
+
+import { X } from "lucide-react";
+import { CarouselRemixPipeline } from "./CarouselRemixPipeline";
+
+export function CarouselRemixPanel({ onClose }: { onClose: () => void }) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-0 backdrop-blur-sm sm:items-center sm:p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Instagram Carousel Remix"
+    >
+      <div className="card-glass flex max-h-[min(92vh,940px)] w-full max-w-5xl flex-col overflow-hidden rounded-t-2xl border border-white/8 sm:rounded-2xl">
+        <div className="flex items-center justify-between border-b border-white/6 px-4 py-3 md:px-5">
+          <div>
+            <h2 className="font-sans text-lg font-semibold text-white">
+              Instagram Carousel Remix
+            </h2>
+            <p className="text-xs text-white/40">
+              Отдельная плитка: импорт через Apify, AI-разбор, рерайт и генерация новой карусели.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg p-2 text-white/50 transition hover:bg-white/5 hover:text-white"
+            aria-label="Закрыть"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto p-4 md:p-6">
+          <CarouselRemixPipeline />
+        </div>
+      </div>
+    </div>
+  );
+}
+7. НОВЫЙ ФАЙЛ CarouselRemixPipeline.tsx
+
+Создать:
+
+artifacts/workbench/src/CarouselRemixPipeline.tsx
+
+Логика должна быть не красивая ради красоты, а рабочая.
+
+State:
+
+type ImportedSlide = {
+  slideIndex: number;
+  imageUrl: string;
+  type: "image" | "video" | "unknown";
+};
+
+type SlideAnalysis = {
+  slideIndex: number;
+  sourceImageUrl: string | null;
+  originalText: string;
+  rewrittenText: string;
+  visualDescription: string;
+  hasFace: boolean;
+  hasScreenshot: boolean;
+  hasText: boolean;
+  preserveNotes: string[];
+  generationPrompt: string;
+  generatedImageUrl: string | null;
+  error: string | null;
+};
+
+type PipelineStatus =
+  | "idle"
+  | "importing"
+  | "analyzing"
+  | "rewriting"
+  | "generating"
+  | "done"
+  | "error";
+
+UI должен иметь ровно эти блоки:
+
+1. Source
+2. Imported slides
+3. AI analysis
+4. Rewrite
+5. Generate
+
+Поля:
+
+Instagram URL input
+Caption textarea
+Style textarea
+Manual upload input multiple
+User photo input
+
+Кнопки:
+
+Import from Instagram
+Analyze carousel
+Rewrite carousel text
+Generate carousel images
+Reset
+
+Точные состояния кнопок:
+
+Import from Instagram disabled если instagramUrl пустой или status === "importing"
+Analyze carousel disabled если нет importedSlides и нет manual files
+Rewrite carousel text disabled если analyses.length === 0
+Generate carousel images disabled если нет rewrittenText хотя бы в одном слайде
+
+Manual fallback обязательно оставить.
+
+Если import не сработал, UI показывает:
+
+Import failed. Upload slide images manually.
+8. BACKEND ENDPOINTS
+
+Открыть:
+
+artifacts/workbench/server/index.ts
+
+Добавить imports:
+
+import multer from "multer";
+
+После env-констант добавить:
+
+const APIFY_TOKEN = process.env.APIFY_TOKEN || "";
+const APIFY_ACTOR_ID = process.env.APIFY_ACTOR_ID || "";
+const TEXT_MODEL =
+  process.env.OPENROUTER_TEXT_MODEL || "google/gemini-2.0-flash-lite-001";
+const VISION_MODEL =
+  process.env.OPENROUTER_VISION_MODEL || "google/gemini-2.0-flash-001";
+
+Добавить multer:
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 12 * 1024 * 1024,
+    files: 20,
+  },
+  fileFilter: (_req, file, cb) => {
+    const allowed = ["image/jpeg", "image/png", "image/webp"];
+    if (!allowed.includes(file.mimetype)) {
+      cb(new Error("Only image/jpeg, image/png and image/webp are supported"));
+      return;
+    }
+    cb(null, true);
+  },
+});
+
+В /wb/health добавить в keys:
+
+apify: !!APIFY_TOKEN,
+9. ENDPOINT 1 — IMPORT
+
+Добавить:
+
+POST /wb/carousel/import-instagram
+
+Request:
+
+{
+  url: string;
+}
+
+Response success:
+
+{
+  ok: true;
+  sourceUrl: string;
+  caption: string;
+  slides: {
+    slideIndex: number;
+    imageUrl: string;
+    type: "image" | "video" | "unknown";
+  }[];
+  rawProvider: "apify";
+}
+
+Ошибки:
+
+400 url is required
+400 Only Instagram post/reel URLs are supported
+503 APIFY_TOKEN not configured
+503 APIFY_ACTOR_ID not configured
+422 No carousel images found in provider response
+502 Apify request failed
+
+Функция проверки URL:
+
+function isInstagramPostUrl(value: string) {
+  return /^https:\/\/(www\.)?instagram\.com\/(p|reel)\//.test(value);
+}
+
+Функция actor id:
+
+function normalizeApifyActorId(actorId: string) {
+  return actorId.includes("/") ? actorId.replace("/", "~") : actorId;
+}
+
+Apify call:
+
+const actorId = normalizeApifyActorId(APIFY_ACTOR_ID);
+
+const apifyUrl =
+  `https://api.apify.com/v2/acts/${actorId}/run-sync-get-dataset-items` +
+  `?token=${encodeURIComponent(APIFY_TOKEN)}` +
+  `&format=json&clean=true&maxItems=20&timeout=120`;
+
+const input = {
+  resultsType: "posts",
+  directUrls: [url],
+  resultsLimit: 1,
+  searchType: "hashtag",
+  searchLimit: 1,
+  addParentData: false,
+};
+
+const apifyRes = await fetch(apifyUrl, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(input),
+});
+
+Apify sync endpoint официально возвращает dataset items, но у него есть риск timeout для долгих запусков, поэтому в MVP ставим timeout=120 и не делаем вечные ожидания.
+
+Нормализация ответа:
+
+function pickFirstString(...values: unknown[]) {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) return value;
+  }
+  return "";
+}
+
+function collectImageUrls(item: Record<string, unknown>) {
+  const urls: string[] = [];
+
+  const pushUrl = (value: unknown) => {
+    if (typeof value === "string" && /^https?:\/\//.test(value)) {
+      urls.push(value);
+    }
+  };
+
+  pushUrl(item.displayUrl);
+  pushUrl(item.imageUrl);
+
+  if (Array.isArray(item.images)) {
+    item.images.forEach(pushUrl);
+  }
+
+  const childPosts = item.childPosts;
+  if (Array.isArray(childPosts)) {
+    childPosts.forEach((child) => {
+      if (child && typeof child === "object") {
+        const c = child as Record<string, unknown>;
+        pushUrl(c.displayUrl);
+        pushUrl(c.imageUrl);
+      }
+    });
+  }
+
+  const carouselMedia = item.carouselMedia;
+  if (Array.isArray(carouselMedia)) {
+    carouselMedia.forEach((media) => {
+      if (media && typeof media === "object") {
+        const m = media as Record<string, unknown>;
+        pushUrl(m.displayUrl);
+        pushUrl(m.imageUrl);
+      }
+    });
+  }
+
+  return Array.from(new Set(urls));
+}
+10. ENDPOINT 2 — ANALYZE
+
+Добавить:
+
+POST /wb/carousel/analyze
+
+Поддержать два режима.
+
+Режим A: imported URLs
+
+Request JSON:
+
+{
+  caption: string;
+  imageUrls: string[];
+}
+Режим B: manual upload
+
+Request multipart:
+
+caption
+slides[]
+
+В обоих режимах endpoint должен собрать images для OpenRouter.
+
+Для URL:
+
+async function imageUrlToDataUrl(imageUrl: string) {
+  const r = await fetch(imageUrl);
+  if (!r.ok) throw new Error(`Failed to fetch image: ${r.status}`);
+  const contentType = r.headers.get("content-type") || "image/jpeg";
+  const buffer = Buffer.from(await r.arrayBuffer());
+  return `data:${contentType};base64,${buffer.toString("base64")}`;
+}
+
+Для file:
+
+function fileToDataUrl(file: Express.Multer.File) {
+  return `data:${file.mimetype};base64,${file.buffer.toString("base64")}`;
+}
+
+OpenRouter call:
+
+const content = [
+  {
+    type: "text",
+    text: prompt,
+  },
+  ...dataUrls.map((url) => ({
+    type: "image_url",
+    image_url: { url },
+  })),
+];
+
+const completion = await openrouter.chat.completions.create({
+  model: VISION_MODEL,
+  max_tokens: 4000,
+  messages: [
+    {
+      role: "system",
+      content:
+        "You analyze Instagram carousel slides for legal, transformative content remixing. Return only valid JSON. No markdown.",
+    },
+    {
+      role: "user",
+      content,
+    } as any,
+  ],
+});
+
+System prompt:
+
+You analyze Instagram carousel slides for legal, transformative content remixing.
+Do not help copy the original post verbatim.
+Extract the useful structure, OCR text, visual elements, screenshots, faces, and preservation requirements.
+Return only valid JSON. No markdown. No explanations.
+
+User prompt:
+
+Analyze these carousel slides and caption.
+
+Caption:
+"""
+${caption}
+"""
+
+For each slide return:
+- slideIndex
+- originalText: exact OCR text visible on the slide, empty string if no readable text
+- visualDescription: concise description of what is visible
+- hasFace: true/false
+- hasScreenshot: true/false
+- hasText: true/false
+- preserveNotes: array of concrete elements that must not be changed if regenerated
+- generationPrompt: short neutral prompt for creating a new transformed slide with the same useful idea but not a copy
+
+Return JSON with this exact shape:
+{
+  "slides": [
+    {
+      "slideIndex": 1,
+      "originalText": "",
+      "visualDescription": "",
+      "hasFace": false,
+      "hasScreenshot": false,
+      "hasText": false,
+      "preserveNotes": [],
+      "generationPrompt": ""
+    }
+  ],
+  "captionSummary": "",
+  "sourceContentAngle": ""
+}
+
+The number of slides in JSON must equal the number of input images.
+Do not invent slides.
+Do not omit slides.
+
+Validation:
+
+- JSON должен парситься
+- slides.length должен быть равен количеству входных изображений
+- slideIndex должен идти с 1
+
+Ошибка:
+
+return res.status(502).json({
+  error: "Invalid model JSON response",
+  raw: rawText.slice(0, 2000),
+});
+11. ENDPOINT 3 — REWRITE
+
+Добавить:
+
+POST /wb/carousel/rewrite
+
+Request:
+
+{
+  caption: string;
+  style: string;
+  slides: SlideAnalysis[];
+}
+
+System prompt:
+
+You rewrite carousel slide text for a new original Instagram carousel.
+Do not copy phrases verbatim.
+Keep the same slide count.
+Keep the practical value.
+Make the text shorter, clearer, more useful, and more viral.
+Write in Russian.
+Style: direct, human, practical, no GPT tone.
+Return only valid JSON.
+
+User prompt:
+
+Rewrite this carousel.
+
+User style:
+"""
+${style}
+"""
+
+Original caption:
+"""
+${caption}
+"""
+
+Slides:
+${JSON.stringify(slides)}
+
+Return JSON:
+{
+  "slides": [
+    {
+      "slideIndex": 1,
+      "rewrittenText": "",
+      "generationPrompt": ""
+    }
+  ],
+  "rewrittenCaption": ""
+}
+
+Rules:
+- Same slide count.
+- Same slide order.
+- No plagiarism.
+- Keep useful meaning.
+- No generic GPT phrases.
+- Each rewrittenText must be short enough for an Instagram carousel slide.
+
+Validation:
+
+- JSON parses
+- rewritten slides count equals input slides count
+- каждый slideIndex совпадает
+12. ENDPOINT 4 — GENERATE
+
+Добавить:
+
+POST /wb/carousel/generate
+
+Request multipart:
+
+slidesJson: string
+userPhoto: file optional
+
+slidesJson содержит массив:
+
+SlideAnalysis[]
+
+Backend должен для каждого слайда:
+
+взять sourceImageUrl;
+скачать изображение;
+загрузить его в fal storage;
+если есть userPhoto и hasFace=true, загрузить userPhoto в fal storage;
+вызвать fal-ai/nano-banana-pro/edit.
+
+Helper:
+
+async function uploadBufferToFalUrl(buffer: Buffer, mimeType: string) {
+  const blob = new Blob([buffer], { type: mimeType });
+  return await fal.storage.upload(blob);
+}
+
+async function remoteImageToFalUrl(imageUrl: string) {
+  const r = await fetch(imageUrl);
+  if (!r.ok) throw new Error(`Failed to fetch image for fal: ${r.status}`);
+  const mimeType = r.headers.get("content-type") || "image/jpeg";
+  const buffer = Buffer.from(await r.arrayBuffer());
+  return uploadBufferToFalUrl(buffer, mimeType);
+}
+
+async function fileToFalUrl(file: Express.Multer.File) {
+  return uploadBufferToFalUrl(file.buffer, file.mimetype);
+}
+
+fal call:
+
+const result = await fal.subscribe("fal-ai/nano-banana-pro/edit", {
+  input: {
+    prompt,
+    image_urls: imageUrls,
+    num_images: 1,
+    aspect_ratio: "4:5",
+    output_format: "png",
+    resolution: "1K",
+  },
+});
+
+Prompt:
+
+Create a new original Instagram carousel slide in 4:5 format.
+
+Do not copy the original design exactly.
+Keep the same useful idea and information structure.
+
+Use this rewritten slide text exactly:
+"""
+${slide.rewrittenText}
+"""
+
+Visual direction:
+${slide.generationPrompt}
+
+If a screenshot or UI capture exists in the reference image:
+preserve it as a locked content area.
+Do not rewrite, hallucinate, or distort text inside the screenshot.
+
+If a user photo is provided and the original slide contains a person:
+replace the original person with the person from the user reference photo.
+Preserve realistic facial identity from the user reference.
+Do not change age, gender, or facial structure.
+
+Return one clean social media carousel slide.
+No watermark.
+No fake UI text unless explicitly present in rewrittenText.
+
+Если hasScreenshot=true, добавить к prompt:
+
+The screenshot area is critical.
+If you cannot preserve it cleanly, keep the layout simpler and do not redraw tiny screenshot text.
+
+Response:
+
+{
+  ok: true;
+  slides: {
+    slideIndex: number;
+    generatedImageUrl: string | null;
+    error: string | null;
+  }[];
+}
+13. UI FLOW В НОВОЙ ПЛИТКЕ
+Source block
+
+Поля:
+
+Instagram URL
+Caption
+Style
+Manual slide upload
+User photo
+
+Кнопка:
+
+Import from Instagram
+
+После import:
+
+Imported 7 slides
+
+Показать preview каждого imported image.
+
+Analyze block
+
+Кнопка:
+
+Analyze carousel
+
+После анализа карточки:
+
+Slide 1
+
+Original OCR text:
+...
+
+Visual description:
+...
+
+Badges:
+FACE
+SCREENSHOT_LOCKED
+TEXT
+Rewrite block
+
+Кнопка:
+
+Rewrite carousel text
+
+После рерайта:
+
+textarea rewrittenText по каждому слайду
+
+Текст должен редактироваться вручную.
+
+Generate block
+
+Кнопка:
+
+Generate carousel images
+
+После генерации:
+
+картинка каждого слайда
+ссылка open image
+14. ПОШАГОВЫЙ ПЛАН ДЛЯ ИСПОЛНИТЕЛЯ
+ШАГ 1.
+Открыть artifacts/workbench/src/App.tsx.
+Добавить import CarouselRemixPanel.
+Добавить state openCarouselRemix.
+Добавить третью карточку CarouselRemixCard.
+Добавить render CarouselRemixPanel.
+Не менять TrackerTile.
+Не менять FreedzCard.
+
+ШАГ 2.
+Создать artifacts/workbench/src/CarouselRemixPanel.tsx.
+Сделать отдельную модалку.
+Внутрь вставить CarouselRemixPipeline.
+
+ШАГ 3.
+Создать artifacts/workbench/src/CarouselRemixPipeline.tsx.
+Сделать UI:
+- Instagram URL
+- Caption
+- Style
+- Manual slide upload
+- User photo upload
+- Import from Instagram
+- Analyze carousel
+- Rewrite carousel text
+- Generate carousel images
+- Reset
+
+ШАГ 4.
+Открыть artifacts/workbench/server/index.ts.
+Добавить multer.
+Добавить env constants:
+APIFY_TOKEN
+APIFY_ACTOR_ID
+TEXT_MODEL
+VISION_MODEL
+
+ШАГ 5.
+Добавить POST /wb/carousel/import-instagram.
+Endpoint вызывает Apify run-sync-get-dataset-items.
+Endpoint нормализует caption и images.
+Endpoint возвращает slides.
+
+ШАГ 6.
+Добавить POST /wb/carousel/analyze.
+Endpoint принимает либо imageUrls JSON, либо multipart files.
+Endpoint отправляет изображения в OpenRouter vision.
+Endpoint возвращает analysis slides.
+
+ШАГ 7.
+Добавить POST /wb/carousel/rewrite.
+Endpoint переписывает текст каждого слайда.
+Endpoint возвращает rewrittenText по каждому slideIndex.
+
+ШАГ 8.
+Добавить POST /wb/carousel/generate.
+Endpoint загружает source images и userPhoto в fal.storage.
+Endpoint вызывает fal-ai/nano-banana-pro/edit.
+Endpoint возвращает generatedImageUrl по каждому slideIndex.
+
+ШАГ 9.
+Открыть artifacts/workbench/package.json.
+Добавить multer и @types/multer через pnpm commands.
+
+ШАГ 10.
+Запустить проверки:
+pnpm --filter @workspace/workbench run typecheck
+pnpm --filter @workspace/workbench run build
+15. КОМАНДЫ GIT / PNPM
+
+В корне проекта:
+
+git checkout -b feature/instagram-carousel-remix
+pnpm --filter @workspace/workbench add multer
+pnpm --filter @workspace/workbench add -D @types/multer
+pnpm --filter @workspace/workbench run typecheck
+pnpm --filter @workspace/workbench run build
+
+После правок:
+
+git status
+git diff -- artifacts/workbench/src/App.tsx
+git diff -- artifacts/workbench/src/CarouselRemixPanel.tsx
+git diff -- artifacts/workbench/src/CarouselRemixPipeline.tsx
+git diff -- artifacts/workbench/server/index.ts
+git diff -- artifacts/workbench/package.json
+16. ЖЁСТКАЯ ПРОВЕРКА
+Проверка 1. Старое не сломано
+
+Открыть рабочее пространство.
+
+Должно быть 3 плитки:
+
+Telegram Tracker
+Threads — пост + картинка
+Instagram Carousel Remix
+
+Проверить:
+
+Telegram Tracker открывается/работает как раньше.
+Threads — пост + картинка открывается как раньше.
+Новая плитка открывает отдельную модалку.
+Проверка 2. Import
+
+Вставить Instagram URL.
+
+Нажать:
+
+Import from Instagram
+
+Ожидаемый результат:
+
+- caption заполнился
+- появились preview слайдов
+- количество preview равно количеству imported slides
+Проверка 3. Analyze
+
+Нажать:
+
+Analyze carousel
+
+Ожидаемый результат:
+
+- появилась карточка на каждый слайд
+- есть Original OCR text
+- есть Visual description
+- badges отображаются только при true
+Проверка 4. Rewrite
+
+Нажать:
+
+Rewrite carousel text
+
+Ожидаемый результат:
+
+- у каждого слайда появился rewrittenText
+- rewrittenText можно редактировать руками
+- количество rewritten slides не изменилось
+Проверка 5. Generate
+
+Загрузить user photo.
+
+Нажать:
+
+Generate carousel images
+
+Ожидаемый результат:
+
+- у каждого слайда появился generatedImageUrl
+- изображения отображаются в UI
+- если hasFace=false, userPhoto не должен добавляться как reference
+- если hasFace=true, userPhoto должен добавляться как второй reference image
+Проверка 6. Ошибки
+
+Проверить:
+
+Без APIFY_TOKEN import возвращает 503.
+Без APIFY_ACTOR_ID import возвращает 503.
+Без OPENROUTER_API_KEY analyze/rewrite возвращает 503.
+Без FAL_KEY generate возвращает 503.
+Пустой Instagram URL возвращает 400.
+Не Instagram URL возвращает 400.
+Без importedSlides и без manual upload Analyze не запускается.
+17. ФОРМАТ ОТЧЁТА ОТ АГЕНТА
+
+Агент обязан вернуть:
+
+1. Изменённые файлы:
+- ...
+
+2. Созданные файлы:
+- ...
+
+3. Файлы, которые не трогал:
+- TrackerTile.tsx
+- FreedzPanel.tsx
+- FreedzPipeline.tsx
+- freedz-pipeline.json
+- telegram-rewriter/*
+
+4. Добавленные endpoints:
+- POST /wb/carousel/import-instagram
+- POST /wb/carousel/analyze
+- POST /wb/carousel/rewrite
+- POST /wb/carousel/generate
+
+5. ENV variables:
+- APIFY_TOKEN
+- APIFY_ACTOR_ID
+- OPENROUTER_API_KEY
+- OPENROUTER_TEXT_MODEL
+- OPENROUTER_VISION_MODEL
+- FAL_KEY
+
+6. Как нормализуется Apify response:
+- caption берётся из ...
+- images берутся из ...
+
+7. Команды проверки:
+- pnpm --filter @workspace/workbench run typecheck
+- pnpm --filter @workspace/workbench run build
+
+8. Результат ручной проверки:
+- 3 плитки видны
+- старая Freedz плитка открывается
+- новая Instagram плитка открывается
+- import работает / не работает с ошибкой ...
+- analyze работает
+- rewrite работает
+- generate работает
+
+9. Что осталось ограничением:
+- точность сохранения скриншотов зависит от fal.ai
+- Instagram import зависит от Apify actor
+- публикации в Instagram нет
