@@ -50,6 +50,8 @@ timeoutMs = 20000
 [userenv.shared]
 TELEGRAM_API_ID = "27635270"
 SOURCE_CHANNELS = "@kirillbezikov,@ungurenko_adout_digital,@artamonov_proreels,@blogoputiteyhana,@mirneyrosetey,@zolootykh,@ai_innovate_agency,@artem_kotelnikovv,@pasha_production1,@ReelsAcademyPotapovfx,@Evdo_kimova,@sadekovsasha,@saveliylenivin,@anjela_p,@reelsarkazi,@big_bad_coach,@maksim_and_ai,@belyakAi"
+OPENROUTER_TEXT_MODEL = "google/gemini-2.0-flash-lite-001"
+OPENROUTER_VISION_MODEL = "google/gemini-2.0-flash-001"
 
 [nix]
 channel = "stable-25_05"

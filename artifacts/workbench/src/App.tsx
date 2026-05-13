@@ -7,6 +7,7 @@ import {
   Send,
   Sparkles,
 } from "lucide-react";
+import { CarouselRemixPanel } from "./CarouselRemixPanel";
 import { FreedzPanel } from "./FreedzPanel";
 import { TrackerTile } from "./TrackerTile";
 
@@ -21,6 +22,7 @@ export default function App() {
   const [freedz, setFreedz] = useState<FreedzMeta | null>(null);
   const [freedzError, setFreedzError] = useState<string | null>(null);
   const [openFreedz, setOpenFreedz] = useState(false);
+  const [openCarouselRemix, setOpenCarouselRemix] = useState(false);
 
   const loadFreedz = useCallback(async () => {
     try {
@@ -84,6 +86,10 @@ export default function App() {
             error={freedzError}
             open={openFreedz}
           />
+          <CarouselRemixCard
+            onOpen={() => setOpenCarouselRemix(true)}
+            open={openCarouselRemix}
+          />
         </div>
       </main>
 
@@ -93,6 +99,76 @@ export default function App() {
           onReload={loadFreedz}
         />
       )}
+      {openCarouselRemix && (
+        <CarouselRemixPanel onClose={() => setOpenCarouselRemix(false)} />
+      )}
+    </div>
+  );
+}
+
+function CarouselRemixCard({
+  onOpen,
+  open,
+}: {
+  onOpen: () => void;
+  open: boolean;
+}) {
+  return (
+    <div
+      className={`card-glass group relative flex flex-col overflow-hidden rounded-2xl p-5 transition [box-shadow:0_0_0_1px_rgba(91,141,239,0.1)] ${
+        open
+          ? "ring-1 ring-[#5b8def]/30"
+          : "hover:ring-1 hover:ring-[#5b8def]/20"
+      }`}
+    >
+      <div
+        className="absolute top-0 right-0 h-32 w-32 rounded-full opacity-20 blur-3xl"
+        style={{ background: "#5b8def" }}
+        aria-hidden
+      />
+      <div className="relative flex items-start justify-between gap-3">
+        <div>
+          <h2 className="font-sans text-lg font-semibold text-white">
+            Instagram Carousel Remix
+          </h2>
+          <p className="mt-1 text-sm text-[#6b6b7a]">
+            Ссылка Instagram → Apify → слайды + подпись → AI-разбор → рерайт → новая карусель.
+          </p>
+        </div>
+        <div className="hidden shrink-0 md:flex" aria-hidden>
+          <div className="flex flex-col gap-0.5">
+            <div className="h-1.5 w-1.5 rounded-full bg-white/20" />
+            <div className="h-1.5 w-1.5 rounded-full bg-white/20" />
+            <div className="h-1.5 w-1.5 rounded-full bg-white/20" />
+          </div>
+        </div>
+      </div>
+      <div className="relative mt-3 flex flex-wrap items-center gap-2 text-xs">
+        <span className="rounded-full border border-[#5b8def]/30 bg-[#5b8def]/10 px-2 py-0.5 text-[#5b8def]">
+          новая плитка
+        </span>
+        <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-white/50">
+          без замены текущих пайплайнов
+        </span>
+      </div>
+      <div className="relative mt-5 flex min-h-12 flex-1">
+        <div className="flex w-full items-center justify-between gap-2 rounded-xl border border-white/6 bg-white/[0.02] px-3 py-2">
+          <div className="flex flex-1 items-center gap-1.5 overflow-hidden text-white/30">
+            <Link2 className="h-3.5 w-3.5 shrink-0" />
+            <Database className="h-3.5 w-3.5 shrink-0" />
+            <Sparkles className="h-3.5 w-3.5 shrink-0" />
+            <ImageIcon className="h-3.5 w-3.5 shrink-0" />
+            <Send className="h-3.5 w-3.5 shrink-0" />
+          </div>
+        </div>
+      </div>
+      <button
+        type="button"
+        onClick={onOpen}
+        className="relative mt-4 w-full rounded-xl border border-[#5b8def]/25 bg-gradient-to-b from-[#17243a]/80 to-[#101927]/60 py-2.5 text-sm font-medium text-white transition hover:border-[#5b8def]/45 hover:from-[#1f3150]/80"
+      >
+        Открыть ремикс
+      </button>
     </div>
   );
 }

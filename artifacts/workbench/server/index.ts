@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import OpenAI from "openai";
 import { fal } from "@fal-ai/client";
+import multer from "multer";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..", "..", "..");
@@ -26,6 +27,13 @@ const FAL_KEY = process.env.FAL_KEY || "";
 const THREADS_TOKEN = process.env.THREADS_TOKEN || "";
 const GEMINI_MODEL = "google/gemini-2.0-flash-lite-001";
 
+const APIFY_TOKEN = process.env.APIFY_TOKEN || "";
+const APIFY_ACTOR_ID = process.env.APIFY_ACTOR_ID || "";
+const TEXT_MODEL =
+  process.env.OPENROUTER_TEXT_MODEL || "google/gemini-2.0-flash-lite-001";
+const VISION_MODEL =
+  process.env.OPENROUTER_VISION_MODEL || "google/gemini-2.0-flash-001";
+
 const openrouter = new OpenAI({
   baseURL: "https://openrouter.ai/api/v1",
   apiKey: OPENROUTER_KEY,
@@ -35,9 +43,103 @@ if (FAL_KEY) {
   fal.config({ credentials: FAL_KEY });
 }
 
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 12 * 1024 * 1024, files: 20 },
+  fileFilter: (_req, file, cb) => {
+    const allowed = ["image/jpeg", "image/png", "image/webp"];
+    if (!allowed.includes(file.mimetype)) {
+      cb(new Error("Only image/jpeg, image/png and image/webp are supported"));
+      return;
+    }
+    cb(null, true);
+  },
+});
+
 const app = express();
 app.use(cors({ origin: true }));
 app.use(express.json({ limit: "4mb" }));
+
+// ─── helpers ────────────────────────────────────────────────────────────────
+
+function isInstagramPostUrl(value: string) {
+  return /^https:\/\/(www\.)?instagram\.com\/(p|reel)\//.test(value);
+}
+
+function normalizeApifyActorId(actorId: string) {
+  return actorId.includes("/") ? actorId.replace("/", "~") : actorId;
+}
+
+function pickFirstString(...values: unknown[]) {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) return value;
+  }
+  return "";
+}
+
+function collectImageUrls(item: Record<string, unknown>) {
+  const urls: string[] = [];
+  const pushUrl = (value: unknown) => {
+    if (typeof value === "string" && /^https?:\/\//.test(value)) {
+      urls.push(value);
+    }
+  };
+  pushUrl(item.displayUrl);
+  pushUrl(item.imageUrl);
+  if (Array.isArray(item.images)) item.images.forEach(pushUrl);
+  const childPosts = item.childPosts;
+  if (Array.isArray(childPosts)) {
+    childPosts.forEach((child) => {
+      if (child && typeof child === "object") {
+        const c = child as Record<string, unknown>;
+        pushUrl(c.displayUrl);
+        pushUrl(c.imageUrl);
+      }
+    });
+  }
+  const carouselMedia = item.carouselMedia;
+  if (Array.isArray(carouselMedia)) {
+    carouselMedia.forEach((media) => {
+      if (media && typeof media === "object") {
+        const m = media as Record<string, unknown>;
+        pushUrl(m.displayUrl);
+        pushUrl(m.imageUrl);
+      }
+    });
+  }
+  return Array.from(new Set(urls));
+}
+
+async function imageUrlToDataUrl(imageUrl: string) {
+  const r = await fetch(imageUrl);
+  if (!r.ok) throw new Error(`Failed to fetch image: ${r.status}`);
+  const contentType = r.headers.get("content-type") || "image/jpeg";
+  const buffer = Buffer.from(await r.arrayBuffer());
+  return `data:${contentType};base64,${buffer.toString("base64")}`;
+}
+
+function fileToDataUrl(file: Express.Multer.File) {
+  return `data:${file.mimetype};base64,${file.buffer.toString("base64")}`;
+}
+
+async function uploadBufferToFalUrl(buffer: Buffer, mimeType: string) {
+  const blob = new Blob([new Uint8Array(buffer)], { type: mimeType });
+  return await fal.storage.upload(blob);
+}
+
+async function remoteImageToFalUrl(imageUrl: string) {
+  const r = await fetch(imageUrl);
+  if (!r.ok) throw new Error(`Failed to fetch image for fal: ${r.status}`);
+  const mimeType = r.headers.get("content-type") || "image/jpeg";
+  const buffer = Buffer.from(await r.arrayBuffer());
+  return uploadBufferToFalUrl(buffer, mimeType);
+}
+
+async function fileToFalUrl(file: Express.Multer.File) {
+  return uploadBufferToFalUrl(file.buffer, file.mimetype);
+}
+
+// ─── health ─────────────────────────────────────────────────────────────────
 
 app.get("/wb/health", (_req, res) => {
   res.json({
@@ -47,9 +149,12 @@ app.get("/wb/health", (_req, res) => {
       openrouter: !!OPENROUTER_KEY,
       fal: !!FAL_KEY,
       threads: !!THREADS_TOKEN,
+      apify: !!APIFY_TOKEN,
     },
   });
 });
+
+// ─── tracker ────────────────────────────────────────────────────────────────
 
 app.get("/wb/tracker", async (_req, res) => {
   try {
@@ -94,6 +199,8 @@ app.put("/wb/tracker", async (req, res) => {
   }
 });
 
+// ─── freedz ─────────────────────────────────────────────────────────────────
+
 app.get("/wb/freedz", async (_req, res) => {
   try {
     const raw = await fs.readFile(FREEDZ_FILE, "utf-8");
@@ -117,6 +224,8 @@ app.put("/wb/freedz", async (req, res) => {
     return res.status(500).json({ error: String(e) });
   }
 });
+
+// ─── pipeline (Threads) ─────────────────────────────────────────────────────
 
 app.get("/wb/pipeline/status", (_req, res) => {
   res.json({
@@ -163,7 +272,7 @@ app.post("/wb/pipeline/image", async (req, res) => {
   }
   try {
     const result = await fal.subscribe("fal-ai/nano-banana-pro/edit", {
-      input: { prompt, num_images: 1 },
+      input: { prompt, image_urls: [], num_images: 1 },
     });
     const images = (result.data as { images?: { url: string }[] }).images ?? [];
     const url = images[0]?.url ?? null;
@@ -228,11 +337,316 @@ app.post("/wb/pipeline/publish", async (req, res) => {
   }
 });
 
+// ─── carousel: import ────────────────────────────────────────────────────────
+
+app.post("/wb/carousel/import-instagram", async (req, res) => {
+  const { url } = req.body as { url?: string };
+  if (!url?.trim()) {
+    return res.status(400).json({ error: "url is required" });
+  }
+  if (!isInstagramPostUrl(url.trim())) {
+    return res.status(400).json({ error: "Only Instagram post/reel URLs are supported" });
+  }
+  if (!APIFY_TOKEN) {
+    return res.status(503).json({ error: "APIFY_TOKEN not configured" });
+  }
+  if (!APIFY_ACTOR_ID) {
+    return res.status(503).json({ error: "APIFY_ACTOR_ID not configured" });
+  }
+  try {
+    const actorId = normalizeApifyActorId(APIFY_ACTOR_ID);
+    const apifyUrl =
+      `https://api.apify.com/v2/acts/${actorId}/run-sync-get-dataset-items` +
+      `?token=${encodeURIComponent(APIFY_TOKEN)}` +
+      `&format=json&clean=true&maxItems=20&timeout=120`;
+
+    const input = {
+      resultsType: "posts",
+      directUrls: [url.trim()],
+      resultsLimit: 1,
+      searchType: "hashtag",
+      searchLimit: 1,
+      addParentData: false,
+    };
+
+    const apifyRes = await fetch(apifyUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
+
+    if (!apifyRes.ok) {
+      return res.status(502).json({
+        error: `Apify request failed: ${apifyRes.status} ${apifyRes.statusText}`,
+      });
+    }
+
+    const items = (await apifyRes.json()) as Record<string, unknown>[];
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(422).json({ error: "No carousel images found in provider response" });
+    }
+
+    const item = items[0];
+    const caption = pickFirstString(item.caption, item.text, item.description);
+    const imageUrls = collectImageUrls(item);
+
+    if (imageUrls.length === 0) {
+      return res.status(422).json({ error: "No carousel images found in provider response" });
+    }
+
+    const slides = imageUrls.map((imageUrl, i) => ({
+      slideIndex: i + 1,
+      imageUrl,
+      type: "image" as const,
+    }));
+
+    return res.json({
+      ok: true,
+      sourceUrl: url.trim(),
+      caption,
+      slides,
+      rawProvider: "apify",
+    });
+  } catch (e) {
+    return res.status(500).json({ error: String(e) });
+  }
+});
+
+// ─── carousel: analyze ───────────────────────────────────────────────────────
+
+app.post(
+  "/wb/carousel/analyze",
+  (req, res, next) => {
+    const ct = req.headers["content-type"] ?? "";
+    if (ct.includes("multipart/form-data")) {
+      upload.array("slides", 20)(req, res, next);
+    } else {
+      next();
+    }
+  },
+  async (req, res) => {
+    if (!OPENROUTER_KEY) {
+      return res.status(503).json({ error: "OPENROUTER_API_KEY not configured" });
+    }
+
+    let caption = "";
+    let dataUrls: string[] = [];
+
+    const ct = req.headers["content-type"] ?? "";
+    if (ct.includes("multipart/form-data")) {
+      const files = req.files as Express.Multer.File[];
+      if (!files || files.length === 0) {
+        return res.status(400).json({ error: "slides files are required" });
+      }
+      caption = (req.body as { caption?: string }).caption ?? "";
+      dataUrls = files.map(fileToDataUrl);
+    } else {
+      const body = req.body as { caption?: string; imageUrls?: string[] };
+      caption = body.caption ?? "";
+      const urls = body.imageUrls ?? [];
+      if (urls.length === 0) {
+        return res.status(400).json({ error: "imageUrls is required" });
+      }
+      try {
+        dataUrls = await Promise.all(urls.map(imageUrlToDataUrl));
+      } catch (e) {
+        return res.status(502).json({ error: `Failed to fetch slide images: ${String(e)}` });
+      }
+    }
+
+    const prompt = `Analyze these carousel slides and caption.\n\nCaption:\n"""\n${caption}\n"""\n\nFor each slide return:\n- slideIndex\n- originalText: exact OCR text visible on the slide, empty string if no readable text\n- visualDescription: concise description of what is visible\n- hasFace: true/false\n- hasScreenshot: true/false\n- hasText: true/false\n- preserveNotes: array of concrete elements that must not be changed if regenerated\n- generationPrompt: short neutral prompt for creating a new transformed slide with the same useful idea but not a copy\n\nReturn JSON with this exact shape:\n{\n  "slides": [\n    {\n      "slideIndex": 1,\n      "originalText": "",\n      "visualDescription": "",\n      "hasFace": false,\n      "hasScreenshot": false,\n      "hasText": false,\n      "preserveNotes": [],\n      "generationPrompt": ""\n    }\n  ],\n  "captionSummary": "",\n  "sourceContentAngle": ""\n}\n\nThe number of slides in JSON must equal the number of input images.\nDo not invent slides.\nDo not omit slides.`;
+
+    try {
+      const content: unknown[] = [
+        { type: "text", text: prompt },
+        ...dataUrls.map((url) => ({
+          type: "image_url",
+          image_url: { url },
+        })),
+      ];
+
+      const completion = await openrouter.chat.completions.create({
+        model: VISION_MODEL,
+        max_tokens: 4000,
+        messages: [
+          {
+            role: "system",
+            content:
+              "You analyze Instagram carousel slides for legal, transformative content remixing. Do not help copy the original post verbatim. Extract the useful structure, OCR text, visual elements, screenshots, faces, and preservation requirements. Return only valid JSON. No markdown. No explanations.",
+          },
+          {
+            role: "user",
+            content,
+          } as Parameters<typeof openrouter.chat.completions.create>[0]["messages"][0],
+        ],
+      });
+
+      const rawText = completion.choices[0]?.message?.content ?? "";
+      let parsed: { slides?: unknown[] };
+      try {
+        const cleaned = rawText.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "").trim();
+        parsed = JSON.parse(cleaned) as { slides?: unknown[] };
+      } catch {
+        return res.status(502).json({ error: "Invalid model JSON response", raw: rawText.slice(0, 2000) });
+      }
+
+      if (!Array.isArray(parsed.slides) || parsed.slides.length !== dataUrls.length) {
+        return res.status(502).json({
+          error: "Invalid model JSON response",
+          raw: rawText.slice(0, 2000),
+        });
+      }
+
+      return res.json({ ok: true, slides: parsed.slides });
+    } catch (e) {
+      return res.status(500).json({ error: String(e) });
+    }
+  }
+);
+
+// ─── carousel: rewrite ───────────────────────────────────────────────────────
+
+app.post("/wb/carousel/rewrite", async (req, res) => {
+  if (!OPENROUTER_KEY) {
+    return res.status(503).json({ error: "OPENROUTER_API_KEY not configured" });
+  }
+  const { caption, style, slides } = req.body as {
+    caption?: string;
+    style?: string;
+    slides?: unknown[];
+  };
+  if (!Array.isArray(slides) || slides.length === 0) {
+    return res.status(400).json({ error: "slides array is required" });
+  }
+
+  const userPrompt = `Rewrite this carousel.\n\nUser style:\n"""\n${style ?? ""}\n"""\n\nOriginal caption:\n"""\n${caption ?? ""}\n"""\n\nSlides:\n${JSON.stringify(slides)}\n\nReturn JSON:\n{\n  "slides": [\n    {\n      "slideIndex": 1,\n      "rewrittenText": "",\n      "generationPrompt": ""\n    }\n  ],\n  "rewrittenCaption": ""\n}\n\nRules:\n- Same slide count.\n- Same slide order.\n- No plagiarism.\n- Keep useful meaning.\n- No generic GPT phrases.\n- Each rewrittenText must be short enough for an Instagram carousel slide.`;
+
+  try {
+    const completion = await openrouter.chat.completions.create({
+      model: TEXT_MODEL,
+      max_tokens: 4000,
+      messages: [
+        {
+          role: "system",
+          content:
+            "You rewrite carousel slide text for a new original Instagram carousel. Do not copy phrases verbatim. Keep the same slide count. Keep the practical value. Make the text shorter, clearer, more useful, and more viral. Write in Russian. Style: direct, human, practical, no GPT tone. Return only valid JSON.",
+        },
+        { role: "user", content: userPrompt },
+      ],
+    });
+
+    const rawText = completion.choices[0]?.message?.content ?? "";
+    let parsed: { slides?: { slideIndex: number; rewrittenText: string; generationPrompt: string }[]; rewrittenCaption?: string };
+    try {
+      const cleaned = rawText.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "").trim();
+      parsed = JSON.parse(cleaned);
+    } catch {
+      return res.status(502).json({ error: "Invalid model JSON response", raw: rawText.slice(0, 2000) });
+    }
+
+    if (!Array.isArray(parsed.slides) || parsed.slides.length !== slides.length) {
+      return res.status(502).json({ error: "Invalid model JSON response", raw: rawText.slice(0, 2000) });
+    }
+
+    return res.json({ ok: true, slides: parsed.slides, rewrittenCaption: parsed.rewrittenCaption ?? "" });
+  } catch (e) {
+    return res.status(500).json({ error: String(e) });
+  }
+});
+
+// ─── carousel: generate ──────────────────────────────────────────────────────
+
+app.post(
+  "/wb/carousel/generate",
+  upload.fields([{ name: "userPhoto", maxCount: 1 }]),
+  async (req, res) => {
+    if (!FAL_KEY) {
+      return res.status(503).json({ error: "FAL_KEY not configured" });
+    }
+
+    const slidesJsonStr = (req.body as { slidesJson?: string }).slidesJson ?? "";
+    if (!slidesJsonStr) {
+      return res.status(400).json({ error: "slidesJson is required" });
+    }
+
+    let slides: {
+      slideIndex: number;
+      sourceImageUrl: string | null;
+      rewrittenText: string;
+      generationPrompt: string;
+      hasFace: boolean;
+      hasScreenshot: boolean;
+    }[];
+    try {
+      slides = JSON.parse(slidesJsonStr);
+    } catch {
+      return res.status(400).json({ error: "slidesJson must be valid JSON" });
+    }
+
+    const filesMap = req.files as Record<string, Express.Multer.File[]> | undefined;
+    const userPhotoFile = filesMap?.["userPhoto"]?.[0] ?? null;
+
+    let userPhotoFalUrl: string | null = null;
+    if (userPhotoFile) {
+      try {
+        userPhotoFalUrl = await fileToFalUrl(userPhotoFile);
+      } catch (e) {
+        return res.status(500).json({ error: `Failed to upload user photo: ${String(e)}` });
+      }
+    }
+
+    const results: { slideIndex: number; generatedImageUrl: string | null; error: string | null }[] = [];
+
+    for (const slide of slides) {
+      try {
+        const imageUrls: string[] = [];
+
+        if (slide.sourceImageUrl) {
+          const falUrl = await remoteImageToFalUrl(slide.sourceImageUrl);
+          imageUrls.push(falUrl);
+        }
+
+        if (userPhotoFalUrl && slide.hasFace) {
+          imageUrls.push(userPhotoFalUrl);
+        }
+
+        let prompt = `Create a new original Instagram carousel slide in 4:5 format.\n\nDo not copy the original design exactly.\nKeep the same useful idea and information structure.\n\nUse this rewritten slide text exactly:\n"""\n${slide.rewrittenText}\n"""\n\nVisual direction:\n${slide.generationPrompt}\n\nIf a screenshot or UI capture exists in the reference image:\npreserve it as a locked content area.\nDo not rewrite, hallucinate, or distort text inside the screenshot.\n\nIf a user photo is provided and the original slide contains a person:\nreplace the original person with the person from the user reference photo.\nPreserve realistic facial identity from the user reference.\nDo not change age, gender, or facial structure.\n\nReturn one clean social media carousel slide.\nNo watermark.\nNo fake UI text unless explicitly present in rewrittenText.`;
+
+        if (slide.hasScreenshot) {
+          prompt +=
+            "\n\nThe screenshot area is critical.\nIf you cannot preserve it cleanly, keep the layout simpler and do not redraw tiny screenshot text.";
+        }
+
+        const result = await fal.subscribe("fal-ai/nano-banana-pro/edit", {
+          input: {
+            prompt,
+            image_urls: imageUrls,
+            num_images: 1,
+            aspect_ratio: "4:5",
+            output_format: "png",
+            resolution: "1K",
+          },
+        });
+
+        const images = (result.data as { images?: { url: string }[] }).images ?? [];
+        const url = images[0]?.url ?? null;
+        results.push({ slideIndex: slide.slideIndex, generatedImageUrl: url, error: null });
+      } catch (e) {
+        results.push({ slideIndex: slide.slideIndex, generatedImageUrl: null, error: String(e) });
+      }
+    }
+
+    return res.json({ ok: true, slides: results });
+  }
+);
+
+// ─── static ──────────────────────────────────────────────────────────────────
+
 app.use(express.static(path.join(__dirname, "..", "dist")));
 
 app.listen(PORT, "127.0.0.1", () => {
   console.log(`[workbench-api] http://127.0.0.1:${PORT}`);
   console.log(`[workbench-api] state: ${STATE_FILE}`);
   console.log(`[workbench-api] freedz: ${FREEDZ_FILE}`);
-  console.log(`[workbench-api] openrouter: ${!!OPENROUTER_KEY} | fal: ${!!FAL_KEY} | threads: ${!!THREADS_TOKEN}`);
+  console.log(`[workbench-api] openrouter: ${!!OPENROUTER_KEY} | fal: ${!!FAL_KEY} | threads: ${!!THREADS_TOKEN} | apify: ${!!APIFY_TOKEN}`);
 });
