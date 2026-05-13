@@ -1,13 +1,17 @@
 {
   "extends": "../../tsconfig.base.json",
-  "include": ["src/**/*", "server/**/*.ts", "vite.config.ts"],
+  "include": ["src/**/*.ts", "src/**/*.tsx", "src/vite-env.d.ts", "server/**/*.ts", "vite.config.ts"],
   "exclude": ["node_modules", "dist"],
   "compilerOptions": {
     "noEmit": true,
     "lib": ["es2022", "dom", "dom.iterable"],
     "jsx": "react-jsx",
     "esModuleInterop": true,
-    "types": ["node", "vite/client"],
+    "types": ["node"],
+    "typeRoots": [
+      "./node_modules/@types",
+      "../../node_modules/@types"
+    ],
     "paths": {
       "@/*": ["./src/*"]
     }

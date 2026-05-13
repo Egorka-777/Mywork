@@ -1,0 +1,55 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/types/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    ".next"
+  ],
+  "compilerOptions": {
+    "noEmit": true,
+    "lib": [
+      "es2022",
+      "dom",
+      "dom.iterable"
+    ],
+    "jsx": "preserve",
+    "strictNullChecks": true,
+    "noEmitOnError": true,
+    "tsBuildInfoFile": "node_modules/.tmp/tsconfig.app.tsbuildinfo",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "isolatedModules": true,
+    "noImplicitAny": true,
+    "useUnknownInCatchVariables": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "sourceMap": true,
+    "target": "es2022",
+    "esModuleInterop": true,
+    "allowJs": true,
+    "resolveJsonModule": true,
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
+    "paths": {
+      "@/*": [
+        "./*"
+      ]
+    },
+    "skipLibCheck": true,
+    "types": ["node"],
+    "typeRoots": [
+      "./node_modules/@types",
+      "../../node_modules/@types"
+    ],
+    "strict": true,
+    "incremental": true
+  }
+}

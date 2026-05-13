@@ -1,0 +1,3 @@
+# Уменьшает шум по CRLF (Windows) в git diff и при слияниях.
+* text=auto
+*.{ts,tsx,js,jsx,mjs,cjs,cts,mts,json,md,mdx,yml,yaml,css,html,py,rs,go,java} text eol=lf
