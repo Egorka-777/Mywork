@@ -16,7 +16,7 @@ export function CarouselRemixPanel({ onClose }: { onClose: () => void }) {
               Instagram Carousel Remix
             </h2>
             <p className="text-xs text-white/40">
-              Импорт через Apify, AI-разбор, рерайт и генерация новой карусели.
+              Импорт → AI-анализ → рерайт → GPT Prompt Pack → публикация в Instagram.
             </p>
           </div>
           <button

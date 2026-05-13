@@ -33,6 +33,8 @@ const TEXT_MODEL =
   process.env.OPENROUTER_TEXT_MODEL || "google/gemini-2.0-flash-lite-001";
 const VISION_MODEL =
   process.env.OPENROUTER_VISION_MODEL || "google/gemini-2.0-flash-001";
+const INSTAGRAM_ACCOUNT_ID = process.env.INSTAGRAM_ACCOUNT_ID || "";
+const INSTAGRAM_ACCESS_TOKEN = process.env.INSTAGRAM_ACCESS_TOKEN || "";
 
 const openrouter = new OpenAI({
   baseURL: "https://openrouter.ai/api/v1",
@@ -484,7 +486,7 @@ app.post(
       }
     }
 
-    const prompt = `Analyze these carousel slides and caption.\n\nCaption:\n"""\n${caption}\n"""\n\nFor each slide return:\n- slideIndex\n- originalText: exact OCR text visible on the slide, empty string if no readable text\n- visualDescription: concise description of what is visible\n- hasFace: true/false\n- hasScreenshot: true/false\n- hasText: true/false\n- preserveNotes: array of concrete elements that must not be changed if regenerated\n- generationPrompt: short neutral prompt for creating a new transformed slide with the same useful idea but not a copy\n\nReturn JSON with this exact shape:\n{\n  "slides": [\n    {\n      "slideIndex": 1,\n      "originalText": "",\n      "visualDescription": "",\n      "hasFace": false,\n      "hasScreenshot": false,\n      "hasText": false,\n      "preserveNotes": [],\n      "generationPrompt": ""\n    }\n  ],\n  "captionSummary": "",\n  "sourceContentAngle": ""\n}\n\nThe number of slides in JSON must equal the number of input images.\nDo not invent slides.\nDo not omit slides.`;
+    const prompt = `Analyze these Instagram carousel slides and the post caption.\n\nCaption:\n"""\n${caption}\n"""\n\nFor each slide return ALL of the following fields:\n- slideIndex: integer starting from 1\n- originalText: exact OCR text visible on the slide, empty string if no readable text\n- visualDescription: concise 1-2 sentence description of what is visually shown on the slide\n- hasFace: true if a person's face is visible\n- hasScreenshot: true if the slide contains a screenshot of an app, website, or UI\n- hasText: true if there is readable text on the slide\n- slideRole: one of "cover" (first slide / hook), "content" (informational slide), "cta" (last call-to-action slide), or "unknown"\n- mentionedPeople: array of real person names mentioned or shown (e.g. ["Elon Musk", "Sam Altman"])\n- mentionedBrands: array of brand/company names (e.g. ["Apple", "Tesla"])\n- mentionedTools: array of software tools, apps, AI tools (e.g. ["ChatGPT", "Figma", "Midjourney"])\n- mentionedPlatforms: array of platforms/networks/sites (e.g. ["Instagram", "YouTube", "GitHub"])\n- visualElements: array of specific visual elements present (e.g. ["bold headline", "numbered list", "portrait photo", "pie chart", "dark background", "slide number"])\n- screenshotDescription: if hasScreenshot is true, describe what the screenshot shows; otherwise empty string\n- promptVisualHints: array of 2-4 specific ChatGPT image generation hints for recreating this slide in a new design (e.g. ["Use editorial dark background with blue accent", "Place brand logo in top-right corner"])\n- preserveNotes: array of concrete elements that must not be changed if regenerated\n- generationPrompt: short neutral prompt for creating a new transformed slide with the same useful idea but not a copy\n\nReturn JSON with this exact shape:\n{\n  "slides": [\n    {\n      "slideIndex": 1,\n      "originalText": "",\n      "visualDescription": "",\n      "hasFace": false,\n      "hasScreenshot": false,\n      "hasText": false,\n      "slideRole": "content",\n      "mentionedPeople": [],\n      "mentionedBrands": [],\n      "mentionedTools": [],\n      "mentionedPlatforms": [],\n      "visualElements": [],\n      "screenshotDescription": "",\n      "promptVisualHints": [],\n      "preserveNotes": [],\n      "generationPrompt": ""\n    }\n  ],\n  "captionSummary": "",\n  "sourceContentAngle": ""\n}\n\nThe number of slides in JSON must equal the number of input images.\nDo not invent slides.\nDo not omit slides.\nReturn only valid JSON. No markdown. No explanations.`;
 
     try {
       const content: unknown[] = [
@@ -681,6 +683,146 @@ app.post(
     return res.json({ ok: true, slides: results });
   }
 );
+
+// ─── carousel: upload-final-assets ───────────────────────────────────────────
+
+app.post(
+  "/wb/carousel/upload-final-assets",
+  upload.array("finalSlides", 20),
+  async (req, res) => {
+    const files = req.files as Express.Multer.File[];
+    if (!files || files.length === 0) {
+      return res.status(400).json({ error: "finalSlides files are required" });
+    }
+    if (!FAL_KEY) {
+      return res.status(503).json({ error: "FAL_KEY not configured — cannot upload to public storage" });
+    }
+    try {
+      const urls = await Promise.all(
+        files.map((f) => uploadBufferToFalUrl(f.buffer, f.mimetype))
+      );
+      return res.json({ ok: true, urls });
+    } catch (e) {
+      return res.status(500).json({ error: `Upload failed: ${String(e)}` });
+    }
+  }
+);
+
+// ─── carousel: publish-instagram ─────────────────────────────────────────────
+
+app.post("/wb/carousel/publish-instagram", async (req, res) => {
+  const { caption, imageUrls } = req.body as {
+    caption?: string;
+    imageUrls?: string[];
+  };
+  if (!caption?.trim()) {
+    return res.status(400).json({ error: "caption is required" });
+  }
+  if (!Array.isArray(imageUrls) || imageUrls.length === 0) {
+    return res.status(400).json({ error: "imageUrls array is required" });
+  }
+  if (!INSTAGRAM_ACCOUNT_ID) {
+    return res
+      .status(503)
+      .json({ error: "INSTAGRAM_ACCOUNT_ID not configured — добавьте переменную окружения" });
+  }
+  if (!INSTAGRAM_ACCESS_TOKEN) {
+    return res
+      .status(503)
+      .json({ error: "INSTAGRAM_ACCESS_TOKEN not configured — добавьте переменную окружения" });
+  }
+
+  const baseUrl = "https://graph.instagram.com/v21.0";
+  const igUserId = INSTAGRAM_ACCOUNT_ID;
+  const token = INSTAGRAM_ACCESS_TOKEN;
+
+  try {
+    // Step 1: create a media container for each carousel image
+    const itemIds: string[] = [];
+    for (const imageUrl of imageUrls) {
+      const itemRes = await fetch(`${baseUrl}/${igUserId}/media`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          image_url: imageUrl,
+          is_carousel_item: true,
+          access_token: token,
+        }),
+      });
+      const itemData = (await itemRes.json()) as { id?: string; error?: { message?: string } };
+      if (!itemData.id) {
+        return res.status(502).json({
+          error: `Failed to create carousel item for ${imageUrl}`,
+          detail: itemData.error?.message ?? itemData,
+        });
+      }
+      itemIds.push(itemData.id);
+    }
+
+    // Step 2: create carousel container
+    const carouselRes = await fetch(`${baseUrl}/${igUserId}/media`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        media_type: "CAROUSEL",
+        children: itemIds.join(","),
+        caption: caption.trim(),
+        access_token: token,
+      }),
+    });
+    const carouselData = (await carouselRes.json()) as {
+      id?: string;
+      error?: { message?: string };
+    };
+    if (!carouselData.id) {
+      return res.status(502).json({
+        error: "Failed to create carousel container",
+        detail: carouselData.error?.message ?? carouselData,
+      });
+    }
+
+    // Step 3: publish
+    const publishRes = await fetch(`${baseUrl}/${igUserId}/media_publish`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        creation_id: carouselData.id,
+        access_token: token,
+      }),
+    });
+    const publishData = (await publishRes.json()) as {
+      id?: string;
+      error?: { message?: string };
+    };
+    if (!publishData.id) {
+      return res.status(502).json({
+        error: "Failed to publish carousel",
+        detail: publishData.error?.message ?? publishData,
+      });
+    }
+
+    // Optionally fetch permalink
+    let permalink: string | null = null;
+    try {
+      const infoRes = await fetch(
+        `${baseUrl}/${publishData.id}?fields=permalink&access_token=${token}`
+      );
+      const infoData = (await infoRes.json()) as { permalink?: string };
+      permalink = infoData.permalink ?? null;
+    } catch {
+      // non-critical
+    }
+
+    return res.json({
+      ok: true,
+      publishId: publishData.id,
+      status: "published",
+      permalink,
+    });
+  } catch (e) {
+    return res.status(500).json({ error: String(e) });
+  }
+});
 
 // ─── static ──────────────────────────────────────────────────────────────────
 
