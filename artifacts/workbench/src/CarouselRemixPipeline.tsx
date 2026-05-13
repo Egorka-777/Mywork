@@ -135,18 +135,7 @@ ${visualHintsStr}`;
 
 ${styleNotesLine}
 
-Референс использовать не как пример темы, а как точный визуальный ориентир:
-- премиальный editorial-дизайн;
-- строгая сетка;
-- крупная жирная condensed-типографика;
-- высокий контраст;
-- основные цвета: чёрный, белый, насыщенный синий;
-- минимализм, воздух, аккуратные линии, разделители;
-- номера слайдов в формате 01, 02, 03;
-- маленькая авторская шапка;
-- нижняя служебная линия / footer / стрелка;
-- современный стиль личного бренда / экспертного PDF / premium carousel;
-- все слайды должны выглядеть как одна серия.
+Референс использовать не как пример темы, а как точный визуальный ориентир. Не описывай стиль — считывай его напрямую с прикреплённого изображения: типографику, сетку, отступы, цвета, разделители, шапку, footer, нумерацию слайдов. Все слайды должны выглядеть как единая серия в точно том же визуальном стиле, что и на референсе.
 
 ВАЖНО ПО ВИЗУАЛИЗАЦИИ:
 Если в тексте слайда упоминаются:
@@ -910,6 +899,30 @@ export function CarouselRemixPipeline() {
                 <Download className="h-3.5 w-3.5" />
                 Download .txt
               </button>
+            </div>
+
+            <div className={`rounded-lg border px-3 py-2.5 space-y-2 ${
+              styleRefPreviews.length > 0
+                ? "border-amber-500/30 bg-amber-500/5"
+                : "border-white/8 bg-white/[0.02]"
+            }`}>
+              <p className={`text-xs font-medium ${styleRefPreviews.length > 0 ? "text-amber-300" : "text-white/40"}`}>
+                {styleRefPreviews.length > 0
+                  ? `Прикрепи ${styleRefPreviews.length} референс(ов) к сообщению в ChatGPT — промпт считывает стиль с картинки, не с текста`
+                  : "Совет: загрузи style reference в блоке 1 — промпт считывает стиль с картинки, не с текста"}
+              </p>
+              {styleRefPreviews.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {styleRefPreviews.map((src, i) => (
+                    <img
+                      key={i}
+                      src={src}
+                      alt={`ref ${i + 1}`}
+                      className="h-14 w-14 rounded-md border border-white/8 object-cover"
+                    />
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         )}
