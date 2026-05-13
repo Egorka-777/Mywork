@@ -721,6 +721,11 @@ app.post("/wb/carousel/publish-instagram", async (req, res) => {
   if (!Array.isArray(imageUrls) || imageUrls.length === 0) {
     return res.status(400).json({ error: "imageUrls array is required" });
   }
+  if (imageUrls.length < 2 || imageUrls.length > 10) {
+    return res.status(400).json({
+      error: `Instagram carousel requires 2–10 slides. Got ${imageUrls.length}.`,
+    });
+  }
   if (!INSTAGRAM_ACCOUNT_ID) {
     return res
       .status(503)

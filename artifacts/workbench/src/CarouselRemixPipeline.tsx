@@ -404,14 +404,13 @@ export function CarouselRemixPipeline() {
     setFinalSlideNames(files.map((f) => f.name));
 
     const expectedCount = s.analyses.length || s.importedSlides.length;
-    if (expectedCount > 0 && files.length !== expectedCount) {
-      setS((p) => ({
-        ...p,
-        finalSlideCountError: `Uploaded final slides count must match imported carousel slide count. Expected ${expectedCount}, got ${files.length}.`,
-      }));
-    } else {
-      setS((p) => ({ ...p, finalSlideCountError: null }));
+    let countError: string | null = null;
+    if (files.length < 2 || files.length > 10) {
+      countError = `Instagram carousel requires 2–10 slides. Got ${files.length}.`;
+    } else if (expectedCount > 0 && files.length !== expectedCount) {
+      countError = `Uploaded slides count must match imported carousel slide count. Expected ${expectedCount}, got ${files.length}.`;
     }
+    setS((p) => ({ ...p, finalSlideCountError: countError }));
   };
 
   // ── publish ──────────────────────────────────────────────────────────────────
