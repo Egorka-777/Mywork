@@ -1,10 +1,54 @@
 import crypto from "node:crypto";
 import path from "node:path";
+import os from "node:os";
+import fs from "node:fs/promises";
+import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
 import type OpenAI from "openai";
 import type { Express } from "express";
 
 const _require = createRequire(import.meta.url);
+
+// ─── ffmpeg: extract audio from video buffer → MP3 buffer ──────────────────
+
+async function videoToAudioBuffer(
+  buf: Buffer,
+  inputExt: string
+): Promise<Buffer> {
+  const tmpDir = os.tmpdir();
+  const uid = crypto.randomUUID();
+  const inputPath = path.join(tmpDir, `${uid}_in${inputExt}`);
+  const outputPath = path.join(tmpDir, `${uid}_out.mp3`);
+
+  await fs.writeFile(inputPath, buf);
+
+  await new Promise<void>((resolve, reject) => {
+    const proc = spawn("ffmpeg", [
+      "-y",
+      "-i", inputPath,
+      "-vn",                // no video
+      "-acodec", "libmp3lame",
+      "-q:a", "4",          // VBR quality (smaller file, good enough for STT)
+      "-ar", "16000",       // 16 kHz — optimal for Whisper
+      "-ac", "1",           // mono
+      outputPath,
+    ]);
+    let stderr = "";
+    proc.stderr.on("data", (d: Buffer) => { stderr += d.toString(); });
+    proc.on("close", (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`ffmpeg exited ${code}: ${stderr.slice(-500)}`));
+    });
+  });
+
+  const audioBuf = await fs.readFile(outputPath);
+
+  // clean up temp files (non-blocking)
+  void fs.unlink(inputPath).catch(() => {});
+  void fs.unlink(outputPath).catch(() => {});
+
+  return audioBuf;
+}
 import type {
   ExtractedSource,
   ExtractedVisualDescription,
@@ -518,20 +562,21 @@ export async function extractSourceFromUpload(
     }
   }
 
-  // ── Video (MP4 / MOV) — audio track only ─────────────────────────────────
+  // ── Video (MP4 / MOV) — convert to audio via ffmpeg → Groq Whisper ────────
   if (ext === ".mp4" || ext === ".mov") {
     if (!opts.groqApiKey) {
       return emptyExtractedBase(id, fileName, "video", ["GROQ_API_KEY not configured — audio transcription unavailable."]);
     }
     try {
-      const mime = "audio/mp4";
-      const transcript = await transcribeAudioGroq(opts.groqApiKey, buf, fileName, mime);
+      const mp3Buf = await videoToAudioBuffer(buf, ext);
+      const mp3Name = fileName.replace(/\.[^.]+$/, ".mp3");
+      const transcript = await transcribeAudioGroq(opts.groqApiKey, mp3Buf, mp3Name, "audio/mpeg");
       return {
         id, fileName, fileType: "video",
         fullRawText: transcript,
         transcript,
         visualAssets: [],
-        extractionWarnings: ["Video frame analysis is not available — only audio track was transcribed."],
+        extractionWarnings: [],
       };
     } catch (e) {
       throw new ExtractError(500, { error: "Video transcription failed", detail: String(e) });
