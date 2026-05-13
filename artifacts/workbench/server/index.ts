@@ -63,7 +63,7 @@ app.use(express.json({ limit: "4mb" }));
 // ─── helpers ────────────────────────────────────────────────────────────────
 
 function isInstagramPostUrl(value: string) {
-  return /^https:\/\/(www\.)?instagram\.com\/(p|reel)\//.test(value);
+  return /^https:\/\/(www\.)?instagram\.com\/([\w.]+\/)?(p|reel)\//.test(value);
 }
 
 function normalizeApifyActorId(actorId: string) {
