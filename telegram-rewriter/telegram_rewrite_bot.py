@@ -66,14 +66,31 @@ def load_state() -> dict:
 
 def save_state(state: dict) -> None:
     try:
+        # Preserve control keys written externally (e.g. tracker_enabled from workbench UI)
+        # to avoid race condition where bot's in-memory state overwrites UI changes
+        CONTROL_KEYS = ("tracker_enabled",)
+        if STATE_FILE.exists():
+            try:
+                existing = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+                for key in CONTROL_KEYS:
+                    if key in existing and key not in state:
+                        state[key] = existing[key]
+            except Exception:
+                pass
         STATE_FILE.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
     except Exception as e:
         log.error(f"Could not save state.json: {e}")
 
 
-def is_tracker_enabled(state: dict) -> bool:
-    """Управляется с рабочего стола: state.json → tracker_enabled (по умолчанию True)."""
-    return state.get("tracker_enabled", True)
+def is_tracker_enabled(_state: dict | None = None) -> bool:
+    """Читает tracker_enabled напрямую с диска — защита от гонки с UI."""
+    try:
+        if STATE_FILE.exists():
+            data = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+            return data.get("tracker_enabled", True)
+    except Exception:
+        pass
+    return True
 
 
 def is_bootstrap_done(state: dict) -> bool:
@@ -367,6 +384,10 @@ async def check_channel(client: TelegramClient, state: dict, channel: str) -> No
     new_messages.sort(key=lambda m: m.id)
 
     for message in new_messages:
+        if not is_tracker_enabled():
+            log.info(f"[{channel}] Tracker выключен mid-channel — прерываю.")
+            break
+
         text = message.message or ""
         has_media = message.media is not None
 

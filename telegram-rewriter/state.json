@@ -1,10 +1,10 @@
 {
-  "kirillbezikov": 2710,
-  "ungurenko_adout_digital": 1801,
-  "artamonov_proreels": 1128,
+  "kirillbezikov": 2737,
+  "ungurenko_adout_digital": 1824,
+  "artamonov_proreels": 1136,
   "blogoputiteyhana": 1253,
-  "mirneyrosetey": 2209,
-  "zolootykh": 578,
+  "mirneyrosetey": 2266,
+  "zolootykh": 588,
   "ai_innovate_agency": 335,
   "artem_kotelnikovv": 389,
   "pasha_production1": 1346,
@@ -17,5 +17,6 @@
   "big_bad_coach": 490,
   "maksim_and_ai": 51,
   "belyakai": 3030,
-  "__bootstrapped__": true
+  "__bootstrapped__": true,
+  "tracker_enabled": false
 }
