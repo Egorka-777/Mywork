@@ -42,6 +42,7 @@ const VISION_MODEL =
   process.env.OPENROUTER_VISION_MODEL || "google/gemini-2.0-flash-001";
 const INSTAGRAM_ACCOUNT_ID = process.env.INSTAGRAM_ACCOUNT_ID || "";
 const INSTAGRAM_ACCESS_TOKEN = process.env.INSTAGRAM_ACCESS_TOKEN || "";
+const GROQ_API_KEY = process.env.GROQ_API_KEY || "";
 
 const openrouter = new OpenAI({
   baseURL: "https://openrouter.ai/api/v1",
@@ -926,6 +927,7 @@ app.post(
         {
           visionModel: VISION_MODEL,
           hasOpenRouter: !!OPENROUTER_KEY,
+          groqApiKey: GROQ_API_KEY || undefined,
         },
         file
       );

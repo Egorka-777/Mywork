@@ -1,7 +1,10 @@
 import crypto from "node:crypto";
 import path from "node:path";
+import { createRequire } from "node:module";
 import type OpenAI from "openai";
 import type { Express } from "express";
+
+const _require = createRequire(import.meta.url);
 import type {
   ExtractedSource,
   ExtractedVisualDescription,
@@ -321,11 +324,103 @@ async function visionExtractImage(
   return mapVisionJsonToAsset(parsed as Record<string, unknown>, id);
 }
 
+// ─── Audio transcription via Groq Whisper ──────────────────────────────────
+
+async function transcribeAudioGroq(
+  groqApiKey: string,
+  buf: Buffer,
+  fileName: string,
+  mimeType: string
+): Promise<string> {
+  const formData = new FormData();
+  const blob = new Blob([new Uint8Array(buf)], { type: mimeType });
+  formData.append("file", blob, fileName);
+  formData.append("model", "whisper-large-v3-turbo");
+  formData.append("response_format", "text");
+
+  const response = await fetch(
+    "https://api.groq.com/openai/v1/audio/transcriptions",
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${groqApiKey}` },
+      body: formData,
+    }
+  );
+
+  if (!response.ok) {
+    const err = await response.text();
+    throw new Error(`Groq transcription error ${response.status}: ${err}`);
+  }
+
+  const text = await response.text();
+  return text.trim();
+}
+
+// ─── PDF extraction ─────────────────────────────────────────────────────────
+
+async function extractPdf(buf: Buffer): Promise<string> {
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+  const pdfParse = _require("pdf-parse") as (
+    buf: Buffer
+  ) => Promise<{ text: string }>;
+  const data = await pdfParse(buf);
+  return normalizeLineBreaks(data.text ?? "");
+}
+
+// ─── DOCX extraction ────────────────────────────────────────────────────────
+
+async function extractDocx(buf: Buffer): Promise<string> {
+  const mammoth = _require("mammoth") as {
+    extractRawText: (opts: { buffer: Buffer }) => Promise<{ value: string }>;
+  };
+  const result = await mammoth.extractRawText({ buffer: buf });
+  return normalizeLineBreaks(result.value ?? "");
+}
+
+// ─── PPTX extraction ────────────────────────────────────────────────────────
+
+type PptxSlide = { slideNumber: number; rawText: string; layoutNotes: string; visualAssets: ExtractedVisualDescription[] };
+
+function extractPptx(buf: Buffer): { slides: PptxSlide[]; fullRawText: string } {
+  const AdmZip = _require("adm-zip") as new (buf: Buffer) => {
+    getEntries(): { entryName: string; getData(): Buffer }[];
+  };
+  const zip = new AdmZip(buf);
+  const entries = zip.getEntries();
+
+  const slideEntries = entries
+    .filter((e) => /^ppt\/slides\/slide\d+\.xml$/.test(e.entryName))
+    .sort((a, b) => {
+      const na = parseInt(a.entryName.match(/\d+/)![0], 10);
+      const nb = parseInt(b.entryName.match(/\d+/)![0], 10);
+      return na - nb;
+    });
+
+  const slides: PptxSlide[] = slideEntries.map((entry, i) => {
+    const xml = entry.getData().toString("utf-8");
+    const textMatches = xml.match(/<a:t[^>]*>([^<]*)<\/a:t>/g) ?? [];
+    const texts = textMatches.map((t) => t.replace(/<[^>]+>/g, "").trim()).filter(Boolean);
+    const rawText = texts.join(" ");
+    return {
+      slideNumber: i + 1,
+      rawText,
+      layoutNotes: "",
+      visualAssets: [],
+    };
+  });
+
+  const fullRawText = slides.map((s) => `Slide ${s.slideNumber}:\n${s.rawText}`).join("\n\n");
+  return { slides, fullRawText };
+}
+
+// ─── Main extract function ──────────────────────────────────────────────────
+
 export async function extractSourceFromUpload(
   openrouter: OpenAI,
   opts: {
     visionModel: string;
     hasOpenRouter: boolean;
+    groqApiKey?: string;
   },
   file: Express.Multer.File
 ): Promise<ExtractedSource> {
@@ -340,45 +435,26 @@ export async function extractSourceFromUpload(
   const fileType = extToFileType(ext);
   const buf = file.buffer;
 
+  // ── Plain text ────────────────────────────────────────────────────────────
   if (ext === ".txt" || ext === ".md") {
     const fullRawText = normalizeLineBreaks(buf.toString("utf-8"));
-    return {
-      id,
-      fileName,
-      fileType: "text",
-      fullRawText,
-      visualAssets: [],
-      extractionWarnings: [],
-    };
+    return { id, fileName, fileType: "text", fullRawText, visualAssets: [], extractionWarnings: [] };
   }
 
+  // ── Image (vision) ────────────────────────────────────────────────────────
   if ([".png", ".jpg", ".jpeg", ".webp"].includes(ext)) {
     if (!opts.hasOpenRouter) {
-      throw new ExtractError(503, {
-        error: "OPENROUTER_API_KEY not configured",
-      });
+      throw new ExtractError(503, { error: "OPENROUTER_API_KEY not configured" });
     }
     try {
       const mime =
         file.mimetype && file.mimetype !== "application/octet-stream"
           ? file.mimetype
-          : ext === ".png"
-            ? "image/png"
-            : ext === ".webp"
-              ? "image/webp"
-              : "image/jpeg";
-      const asset = await visionExtractImage(
-        openrouter,
-        opts.visionModel,
-        buf,
-        mime
-      );
-      const visible = asset.visibleText;
+          : ext === ".png" ? "image/png" : ext === ".webp" ? "image/webp" : "image/jpeg";
+      const asset = await visionExtractImage(openrouter, opts.visionModel, buf, mime);
       return {
-        id,
-        fileName,
-        fileType: "image",
-        fullRawText: visible,
+        id, fileName, fileType: "image",
+        fullRawText: asset.visibleText,
         visualAssets: [asset],
         extractionWarnings: [],
       };
@@ -386,50 +462,83 @@ export async function extractSourceFromUpload(
       const msg = String(e);
       if (msg.startsWith("VISION_JSON:")) {
         const raw = msg.slice("VISION_JSON:".length);
-        throw new ExtractError(500, {
-          error: "extraction failed",
-          detail: "Invalid model JSON response",
-          raw: raw.slice(0, 2000),
-        });
+        throw new ExtractError(500, { error: "extraction failed", detail: "Invalid model JSON response", raw: raw.slice(0, 2000) });
       }
       throw new ExtractError(500, { error: "extraction failed", detail: msg });
     }
   }
 
+  // ── DOCX ─────────────────────────────────────────────────────────────────
   if (ext === ".docx") {
-    return emptyExtractedBase(id, fileName, "docx", [
-      "DOCX extraction is not configured yet.",
-    ]);
+    try {
+      const fullRawText = await extractDocx(buf);
+      return { id, fileName, fileType: "docx", fullRawText, visualAssets: [], extractionWarnings: [] };
+    } catch (e) {
+      throw new ExtractError(500, { error: "DOCX extraction failed", detail: String(e) });
+    }
   }
 
+  // ── PDF ───────────────────────────────────────────────────────────────────
   if (ext === ".pdf") {
-    return emptyExtractedBase(id, fileName, "pdf", [
-      "PDF text extraction is not configured yet.",
-    ]);
+    try {
+      const fullRawText = await extractPdf(buf);
+      return { id, fileName, fileType: "pdf", fullRawText, visualAssets: [], extractionWarnings: [] };
+    } catch (e) {
+      throw new ExtractError(500, { error: "PDF extraction failed", detail: String(e) });
+    }
   }
 
+  // ── PPTX ──────────────────────────────────────────────────────────────────
   if (ext === ".pptx") {
-    return emptyExtractedBase(id, fileName, "presentation", [
-      "PPTX extraction is not configured yet.",
-    ]);
+    try {
+      const { slides, fullRawText } = extractPptx(buf);
+      return { id, fileName, fileType: "presentation", fullRawText, slides, visualAssets: [], extractionWarnings: [] };
+    } catch (e) {
+      throw new ExtractError(500, { error: "PPTX extraction failed", detail: String(e) });
+    }
   }
 
+  // ── Audio (MP3 / WAV) ─────────────────────────────────────────────────────
   if (ext === ".mp3" || ext === ".wav") {
-    return emptyExtractedBase(id, fileName, "audio", [
-      "Audio transcription is not configured yet.",
-    ]);
+    if (!opts.groqApiKey) {
+      return emptyExtractedBase(id, fileName, "audio", ["GROQ_API_KEY not configured — audio transcription unavailable."]);
+    }
+    try {
+      const mime = ext === ".wav" ? "audio/wav" : "audio/mpeg";
+      const transcript = await transcribeAudioGroq(opts.groqApiKey, buf, fileName, mime);
+      return {
+        id, fileName, fileType: "audio",
+        fullRawText: transcript,
+        transcript,
+        visualAssets: [],
+        extractionWarnings: [],
+      };
+    } catch (e) {
+      throw new ExtractError(500, { error: "Audio transcription failed", detail: String(e) });
+    }
   }
 
+  // ── Video (MP4 / MOV) — audio track only ─────────────────────────────────
   if (ext === ".mp4" || ext === ".mov") {
-    return emptyExtractedBase(id, fileName, "video", [
-      "Video frame analysis is not configured yet.",
-      "Audio transcription is not configured yet.",
-    ]);
+    if (!opts.groqApiKey) {
+      return emptyExtractedBase(id, fileName, "video", ["GROQ_API_KEY not configured — audio transcription unavailable."]);
+    }
+    try {
+      const mime = "audio/mp4";
+      const transcript = await transcribeAudioGroq(opts.groqApiKey, buf, fileName, mime);
+      return {
+        id, fileName, fileType: "video",
+        fullRawText: transcript,
+        transcript,
+        visualAssets: [],
+        extractionWarnings: ["Video frame analysis is not available — only audio track was transcribed."],
+      };
+    } catch (e) {
+      throw new ExtractError(500, { error: "Video transcription failed", detail: String(e) });
+    }
   }
 
-  return emptyExtractedBase(id, fileName, "unknown", [
-    "unsupported file type",
-  ]);
+  return emptyExtractedBase(id, fileName, "unknown", ["unsupported file type"]);
 }
 
 export class ExtractError extends Error {
