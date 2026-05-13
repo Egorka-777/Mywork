@@ -378,8 +378,11 @@ app.post("/wb/carousel/import-instagram", async (req, res) => {
     });
 
     if (!apifyRes.ok) {
+      let apifyBody = "";
+      try { apifyBody = await apifyRes.text(); } catch { /* ignore */ }
       return res.status(502).json({
         error: `Apify request failed: ${apifyRes.status} ${apifyRes.statusText}`,
+        detail: apifyBody.slice(0, 500),
       });
     }
 

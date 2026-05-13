@@ -98,8 +98,9 @@ export function CarouselRemixPipeline() {
         caption?: string;
         slides?: ImportedSlide[];
         error?: string;
+        detail?: string;
       };
-      if (!r.ok || !d.ok) throw new Error(d.error ?? "Import failed");
+      if (!r.ok || !d.ok) throw new Error(d.error ? `${d.error}${d.detail ? ` — ${d.detail}` : ""}` : "Import failed");
       setS((p) => ({
         ...p,
         status: "idle",
