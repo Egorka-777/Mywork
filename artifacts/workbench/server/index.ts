@@ -732,9 +732,30 @@ app.post("/wb/carousel/publish-instagram", async (req, res) => {
       .json({ error: "INSTAGRAM_ACCESS_TOKEN not configured — добавьте переменную окружения" });
   }
 
-  const baseUrl = "https://graph.instagram.com/v21.0";
+  // Meta Graph API for Instagram content publishing uses graph.facebook.com
+  const baseUrl = "https://graph.facebook.com/v21.0";
   const igUserId = INSTAGRAM_ACCOUNT_ID;
   const token = INSTAGRAM_ACCESS_TOKEN;
+
+  // Helper: poll a media container until status is FINISHED (or error)
+  async function pollContainerReady(
+    containerId: string,
+    maxAttempts = 20,
+    intervalMs = 3000
+  ): Promise<{ ready: boolean; statusCode?: string }> {
+    for (let i = 0; i < maxAttempts; i++) {
+      const r = await fetch(
+        `${baseUrl}/${containerId}?fields=status_code&access_token=${token}`
+      );
+      const d = (await r.json()) as { status_code?: string };
+      if (d.status_code === "FINISHED") return { ready: true, statusCode: d.status_code };
+      if (d.status_code === "ERROR" || d.status_code === "EXPIRED") {
+        return { ready: false, statusCode: d.status_code };
+      }
+      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    }
+    return { ready: false, statusCode: "TIMEOUT" };
+  }
 
   try {
     // Step 1: create a media container for each carousel image
@@ -754,6 +775,14 @@ app.post("/wb/carousel/publish-instagram", async (req, res) => {
         return res.status(502).json({
           error: `Failed to create carousel item for ${imageUrl}`,
           detail: itemData.error?.message ?? itemData,
+        });
+      }
+      // Poll each item container until ready
+      const itemReady = await pollContainerReady(itemData.id);
+      if (!itemReady.ready) {
+        return res.status(502).json({
+          error: `Carousel item container not ready: ${itemReady.statusCode}`,
+          containerId: itemData.id,
         });
       }
       itemIds.push(itemData.id);
@@ -781,6 +810,15 @@ app.post("/wb/carousel/publish-instagram", async (req, res) => {
       });
     }
 
+    // Poll carousel container until ready
+    const carouselReady = await pollContainerReady(carouselData.id);
+    if (!carouselReady.ready) {
+      return res.status(502).json({
+        error: `Carousel container not ready: ${carouselReady.statusCode}`,
+        containerId: carouselData.id,
+      });
+    }
+
     // Step 3: publish
     const publishRes = await fetch(`${baseUrl}/${igUserId}/media_publish`, {
       method: "POST",
@@ -801,7 +839,7 @@ app.post("/wb/carousel/publish-instagram", async (req, res) => {
       });
     }
 
-    // Optionally fetch permalink
+    // Fetch permalink (non-critical)
     let permalink: string | null = null;
     try {
       const infoRes = await fetch(
