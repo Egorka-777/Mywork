@@ -357,8 +357,7 @@ app.post("/wb/carousel/import-instagram", async (req, res) => {
     const actorId = normalizeApifyActorId(APIFY_ACTOR_ID);
     const apifyUrl =
       `https://api.apify.com/v2/acts/${actorId}/run-sync-get-dataset-items` +
-      `?token=${encodeURIComponent(APIFY_TOKEN)}` +
-      `&format=json&clean=true&maxItems=20&timeout=120`;
+      `?format=json&clean=true&maxItems=20&timeout=120`;
 
     const input = {
       resultsType: "posts",
@@ -371,7 +370,10 @@ app.post("/wb/carousel/import-instagram", async (req, res) => {
 
     const apifyRes = await fetch(apifyUrl, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${APIFY_TOKEN}`,
+      },
       body: JSON.stringify(input),
     });
 
