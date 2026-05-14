@@ -9,68 +9,41 @@ import type { Express } from "express";
 
 const _require = createRequire(import.meta.url);
 
-// ─── Server logger ──────────────────────────────────────────────────────────
-
-function srvLog(reqId: string, step: string, msg: string, extra?: unknown) {
-  const ts = new Date().toISOString();
-  const extras = extra !== undefined ? ` | ${JSON.stringify(extra)}` : "";
-  console.log(`[source-rewriter][${reqId}][${step}] ${msg}${extras} (${ts})`);
-}
-
-function srvErr(reqId: string, step: string, msg: string, err: unknown) {
-  const ts = new Date().toISOString();
-  const detail = err instanceof Error
-    ? `${err.message}${err.stack ? "\n" + err.stack : ""}`
-    : JSON.stringify(err);
-  console.error(`[source-rewriter][${reqId}][${step}] ERROR: ${msg}\n${detail} (${ts})`);
-}
-
 // ─── ffmpeg: extract audio from video buffer → MP3 buffer ──────────────────
 
 async function videoToAudioBuffer(
   buf: Buffer,
-  inputExt: string,
-  reqId: string
+  inputExt: string
 ): Promise<Buffer> {
   const tmpDir = os.tmpdir();
   const uid = crypto.randomUUID();
   const inputPath = path.join(tmpDir, `${uid}_in${inputExt}`);
   const outputPath = path.join(tmpDir, `${uid}_out.mp3`);
 
-  srvLog(reqId, "ffmpeg", `Запись входного файла во temp: ${inputPath} (${(buf.length / 1024 / 1024).toFixed(2)} MB)`);
   await fs.writeFile(inputPath, buf);
 
-  srvLog(reqId, "ffmpeg", `Запуск конвертации: ffmpeg -i ${inputPath} → ${outputPath} (16kHz mono mp3)`);
-  const t0 = Date.now();
-
-  let ffmpegStderr = "";
   await new Promise<void>((resolve, reject) => {
     const proc = spawn("ffmpeg", [
       "-y",
       "-i", inputPath,
-      "-vn",
+      "-vn",                // no video
       "-acodec", "libmp3lame",
-      "-q:a", "4",
-      "-ar", "16000",
-      "-ac", "1",
+      "-q:a", "4",          // VBR quality (smaller file, good enough for STT)
+      "-ar", "16000",       // 16 kHz — optimal for Whisper
+      "-ac", "1",           // mono
       outputPath,
     ]);
-    proc.stderr.on("data", (d: Buffer) => { ffmpegStderr += d.toString(); });
+    let stderr = "";
+    proc.stderr.on("data", (d: Buffer) => { stderr += d.toString(); });
     proc.on("close", (code) => {
-      if (code === 0) {
-        srvLog(reqId, "ffmpeg", `Конвертация завершена за ${Date.now() - t0}ms`);
-        resolve();
-      } else {
-        const tail = ffmpegStderr.slice(-800);
-        srvErr(reqId, "ffmpeg", `ffmpeg завершился с кодом ${code}`, tail);
-        reject(new Error(`ffmpeg exited ${code}: ${tail}`));
-      }
+      if (code === 0) resolve();
+      else reject(new Error(`ffmpeg exited ${code}: ${stderr.slice(-500)}`));
     });
   });
 
   const audioBuf = await fs.readFile(outputPath);
-  srvLog(reqId, "ffmpeg", `MP3 файл прочитан: ${(audioBuf.length / 1024).toFixed(0)} KB`);
 
+  // clean up temp files (non-blocking)
   void fs.unlink(inputPath).catch(() => {});
   void fs.unlink(outputPath).catch(() => {});
 
@@ -401,43 +374,29 @@ async function transcribeAudioGroq(
   groqApiKey: string,
   buf: Buffer,
   fileName: string,
-  mimeType: string,
-  reqId: string
+  mimeType: string
 ): Promise<string> {
-  srvLog(reqId, "groq", `Отправка на Groq Whisper: файл ${fileName} (${(buf.length / 1024).toFixed(0)} KB, mime=${mimeType})`);
-  const t0 = Date.now();
-
   const formData = new FormData();
   const blob = new Blob([new Uint8Array(buf)], { type: mimeType });
   formData.append("file", blob, fileName);
   formData.append("model", "whisper-large-v3-turbo");
   formData.append("response_format", "text");
 
-  let response: Response;
-  try {
-    response = await fetch(
-      "https://api.groq.com/openai/v1/audio/transcriptions",
-      {
-        method: "POST",
-        headers: { Authorization: `Bearer ${groqApiKey}` },
-        body: formData,
-      }
-    );
-  } catch (netErr) {
-    srvErr(reqId, "groq", "Сетевая ошибка при обращении к Groq API", netErr);
-    throw new Error(`Groq network error: ${String(netErr)}`);
-  }
-
-  srvLog(reqId, "groq", `HTTP ответ от Groq: ${response.status} ${response.statusText}`);
+  const response = await fetch(
+    "https://api.groq.com/openai/v1/audio/transcriptions",
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${groqApiKey}` },
+      body: formData,
+    }
+  );
 
   if (!response.ok) {
-    const errBody = await response.text();
-    srvErr(reqId, "groq", `Groq вернул ошибку ${response.status}`, errBody);
-    throw new Error(`Groq ${response.status}: ${errBody}`);
+    const err = await response.text();
+    throw new Error(`Groq transcription error ${response.status}: ${err}`);
   }
 
   const text = await response.text();
-  srvLog(reqId, "groq", `Транскрипт получен за ${Date.now() - t0}ms, длина: ${text.trim().length} символов`);
   return text.trim();
 }
 
@@ -509,17 +468,12 @@ export async function extractSourceFromUpload(
   },
   file: Express.Multer.File
 ): Promise<ExtractedSource> {
-  const reqId = crypto.randomUUID().slice(0, 8);
   const id = crypto.randomUUID();
   const fileName = file.originalname || "upload";
   const ext = path.extname(fileName).toLowerCase();
-  const sizeMB = (file.buffer.length / 1024 / 1024).toFixed(2);
-
-  srvLog(reqId, "init", `Новый запрос: файл="${fileName}" ext="${ext}" размер=${sizeMB}MB mime="${file.mimetype}"`);
 
   if (!SOURCE_REWRITER_ALLOWED_EXT.has(ext)) {
-    srvErr(reqId, "init", `Неподдерживаемый тип файла: ${ext}`, null);
-    throw new ExtractError(400, { error: "unsupported file type", step: "init", reqId });
+    throw new ExtractError(400, { error: "unsupported file type" });
   }
 
   const fileType = extToFileType(ext);
@@ -527,119 +481,105 @@ export async function extractSourceFromUpload(
 
   // ── Plain text ────────────────────────────────────────────────────────────
   if (ext === ".txt" || ext === ".md") {
-    srvLog(reqId, "text", `Читаю plain text файл`);
     const fullRawText = normalizeLineBreaks(buf.toString("utf-8"));
-    srvLog(reqId, "text", `Готово: ${fullRawText.length} символов`);
     return { id, fileName, fileType: "text", fullRawText, visualAssets: [], extractionWarnings: [] };
   }
 
   // ── Image (vision) ────────────────────────────────────────────────────────
   if ([".png", ".jpg", ".jpeg", ".webp"].includes(ext)) {
     if (!opts.hasOpenRouter) {
-      srvErr(reqId, "vision", "OPENROUTER_API_KEY не настроен", null);
-      throw new ExtractError(503, { error: "OPENROUTER_API_KEY not configured", step: "vision", reqId });
+      throw new ExtractError(503, { error: "OPENROUTER_API_KEY not configured" });
     }
     try {
-      const mime = file.mimetype && file.mimetype !== "application/octet-stream"
-        ? file.mimetype
-        : ext === ".png" ? "image/png" : ext === ".webp" ? "image/webp" : "image/jpeg";
-      srvLog(reqId, "vision", `Анализ изображения через модель ${opts.visionModel} (mime=${mime})`);
+      const mime =
+        file.mimetype && file.mimetype !== "application/octet-stream"
+          ? file.mimetype
+          : ext === ".png" ? "image/png" : ext === ".webp" ? "image/webp" : "image/jpeg";
       const asset = await visionExtractImage(openrouter, opts.visionModel, buf, mime);
-      srvLog(reqId, "vision", `Анализ завершён. Видимый текст: ${asset.visibleText.length} символов`);
-      return { id, fileName, fileType: "image", fullRawText: asset.visibleText, visualAssets: [asset], extractionWarnings: [] };
+      return {
+        id, fileName, fileType: "image",
+        fullRawText: asset.visibleText,
+        visualAssets: [asset],
+        extractionWarnings: [],
+      };
     } catch (e) {
       const msg = String(e);
-      srvErr(reqId, "vision", "Ошибка vision-модели", e);
       if (msg.startsWith("VISION_JSON:")) {
         const raw = msg.slice("VISION_JSON:".length);
-        throw new ExtractError(500, { error: "Ошибка парсинга JSON от модели", step: "vision", reqId, raw: raw.slice(0, 2000) });
+        throw new ExtractError(500, { error: "extraction failed", detail: "Invalid model JSON response", raw: raw.slice(0, 2000) });
       }
-      throw new ExtractError(500, { error: "Ошибка vision-анализа", step: "vision", reqId, detail: msg });
+      throw new ExtractError(500, { error: "extraction failed", detail: msg });
     }
   }
 
   // ── DOCX ─────────────────────────────────────────────────────────────────
   if (ext === ".docx") {
     try {
-      srvLog(reqId, "docx", "Извлекаю текст из DOCX через mammoth");
       const fullRawText = await extractDocx(buf);
-      srvLog(reqId, "docx", `Готово: ${fullRawText.length} символов`);
       return { id, fileName, fileType: "docx", fullRawText, visualAssets: [], extractionWarnings: [] };
     } catch (e) {
-      srvErr(reqId, "docx", "Ошибка mammoth", e);
-      throw new ExtractError(500, { error: "Ошибка извлечения DOCX", step: "docx", reqId, detail: String(e) });
+      throw new ExtractError(500, { error: "DOCX extraction failed", detail: String(e) });
     }
   }
 
   // ── PDF ───────────────────────────────────────────────────────────────────
   if (ext === ".pdf") {
     try {
-      srvLog(reqId, "pdf", "Извлекаю текст из PDF через pdf-parse");
       const fullRawText = await extractPdf(buf);
-      srvLog(reqId, "pdf", `Готово: ${fullRawText.length} символов`);
       return { id, fileName, fileType: "pdf", fullRawText, visualAssets: [], extractionWarnings: [] };
     } catch (e) {
-      srvErr(reqId, "pdf", "Ошибка pdf-parse", e);
-      throw new ExtractError(500, { error: "Ошибка извлечения PDF", step: "pdf", reqId, detail: String(e) });
+      throw new ExtractError(500, { error: "PDF extraction failed", detail: String(e) });
     }
   }
 
   // ── PPTX ──────────────────────────────────────────────────────────────────
   if (ext === ".pptx") {
     try {
-      srvLog(reqId, "pptx", "Парсю слайды PPTX через adm-zip");
       const { slides, fullRawText } = extractPptx(buf);
-      srvLog(reqId, "pptx", `Готово: ${slides.length} слайдов, ${fullRawText.length} символов`);
       return { id, fileName, fileType: "presentation", fullRawText, slides, visualAssets: [], extractionWarnings: [] };
     } catch (e) {
-      srvErr(reqId, "pptx", "Ошибка парсинга PPTX", e);
-      throw new ExtractError(500, { error: "Ошибка извлечения PPTX", step: "pptx", reqId, detail: String(e) });
+      throw new ExtractError(500, { error: "PPTX extraction failed", detail: String(e) });
     }
   }
 
   // ── Audio (MP3 / WAV) ─────────────────────────────────────────────────────
   if (ext === ".mp3" || ext === ".wav") {
     if (!opts.groqApiKey) {
-      srvErr(reqId, "audio", "GROQ_API_KEY не настроен", null);
-      return emptyExtractedBase(id, fileName, "audio", ["GROQ_API_KEY не настроен — транскрипция недоступна."]);
+      return emptyExtractedBase(id, fileName, "audio", ["GROQ_API_KEY not configured — audio transcription unavailable."]);
     }
     try {
-      srvLog(reqId, "audio", `Начинаю транскрипцию аудио (${ext})`);
       const mime = ext === ".wav" ? "audio/wav" : "audio/mpeg";
-      const transcript = await transcribeAudioGroq(opts.groqApiKey, buf, fileName, mime, reqId);
-      srvLog(reqId, "audio", `Транскрипция завершена успешно: ${transcript.length} символов`);
-      return { id, fileName, fileType: "audio", fullRawText: transcript, transcript, visualAssets: [], extractionWarnings: [] };
+      const transcript = await transcribeAudioGroq(opts.groqApiKey, buf, fileName, mime);
+      return {
+        id, fileName, fileType: "audio",
+        fullRawText: transcript,
+        transcript,
+        visualAssets: [],
+        extractionWarnings: [],
+      };
     } catch (e) {
-      srvErr(reqId, "audio", "Ошибка транскрипции аудио", e);
-      throw new ExtractError(500, { error: "Ошибка транскрипции аудио", step: "groq", reqId, detail: String(e) });
+      throw new ExtractError(500, { error: "Audio transcription failed", detail: String(e) });
     }
   }
 
-  // ── Video (MP4 / MOV) ─────────────────────────────────────────────────────
+  // ── Video (MP4 / MOV) — convert to audio via ffmpeg → Groq Whisper ────────
   if (ext === ".mp4" || ext === ".mov") {
     if (!opts.groqApiKey) {
-      srvErr(reqId, "video", "GROQ_API_KEY не настроен", null);
-      return emptyExtractedBase(id, fileName, "video", ["GROQ_API_KEY не настроен — транскрипция недоступна."]);
+      return emptyExtractedBase(id, fileName, "video", ["GROQ_API_KEY not configured — audio transcription unavailable."]);
     }
-    srvLog(reqId, "video", `Начинаю пайплайн: видео → аудио (ffmpeg) → транскрипт (Groq Whisper)`);
     try {
-      srvLog(reqId, "video:ffmpeg", "Конвертирую видео в MP3...");
-      const mp3Buf = await videoToAudioBuffer(buf, ext, reqId);
+      const mp3Buf = await videoToAudioBuffer(buf, ext);
       const mp3Name = fileName.replace(/\.[^.]+$/, ".mp3");
-      srvLog(reqId, "video:groq", `Отправляю MP3 (${(mp3Buf.length / 1024).toFixed(0)} KB) на Groq Whisper...`);
-      const transcript = await transcribeAudioGroq(opts.groqApiKey, mp3Buf, mp3Name, "audio/mpeg", reqId);
-      srvLog(reqId, "video", `✓ Пайплайн завершён: транскрипт ${transcript.length} символов`);
-      return { id, fileName, fileType: "video", fullRawText: transcript, transcript, visualAssets: [], extractionWarnings: [] };
+      const transcript = await transcribeAudioGroq(opts.groqApiKey, mp3Buf, mp3Name, "audio/mpeg");
+      return {
+        id, fileName, fileType: "video",
+        fullRawText: transcript,
+        transcript,
+        visualAssets: [],
+        extractionWarnings: [],
+      };
     } catch (e) {
-      srvErr(reqId, "video", "Ошибка в пайплайне видео", e);
-      const isffmpeg = String(e).includes("ffmpeg");
-      const step = isffmpeg ? "ffmpeg" : "groq";
-      throw new ExtractError(500, {
-        error: isffmpeg ? "Ошибка конвертации видео (ffmpeg)" : "Ошибка транскрипции (Groq Whisper)",
-        step,
-        reqId,
-        detail: String(e),
-      });
+      throw new ExtractError(500, { error: "Video transcription failed", detail: String(e) });
     }
   }
 
