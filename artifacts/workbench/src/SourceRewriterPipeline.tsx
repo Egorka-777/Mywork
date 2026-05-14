@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useRef, useState, useEffect } from "react";
 import { Loader2 } from "lucide-react";
 import type {
   ExtractedSource,
@@ -216,6 +216,75 @@ function VisualAssetFields({
   );
 }
 
+// ─── Log console types ───────────────────────────────────────────────────────
+
+type LogKind = "info" | "ok" | "err" | "warn" | "step";
+
+interface LogLine {
+  t: string;      // timestamp HH:MM:SS
+  msg: string;
+  kind: LogKind;
+}
+
+function nowHMS() {
+  return new Date().toTimeString().slice(0, 8);
+}
+
+// ─── Video / audio file detector ─────────────────────────────────────────────
+
+function isVideoFile(f: File) {
+  return /\.(mp4|mov)$/i.test(f.name);
+}
+function isAudioFile(f: File) {
+  return /\.(mp3|wav)$/i.test(f.name);
+}
+
+// ─── Log console component ───────────────────────────────────────────────────
+
+function LogConsole({ lines }: { lines: LogLine[] }) {
+  const bottomRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [lines.length]);
+
+  if (lines.length === 0) return null;
+
+  const kindCls: Record<LogKind, string> = {
+    info: "text-white/55",
+    step: "text-sky-300/90",
+    ok:   "text-emerald-400",
+    warn: "text-amber-300/90",
+    err:  "text-red-400",
+  };
+  const kindPfx: Record<LogKind, string> = {
+    info: "·",
+    step: "▶",
+    ok:   "✓",
+    warn: "⚠",
+    err:  "✕",
+  };
+
+  return (
+    <div className="mt-4 rounded-lg border border-white/8 bg-black/40 p-3 font-mono text-[11px] leading-5">
+      <p className="mb-1.5 text-[10px] uppercase tracking-widest text-white/25">
+        лог запроса
+      </p>
+      <div className="max-h-52 overflow-y-auto space-y-0.5">
+        {lines.map((l, i) => (
+          <div key={i} className="flex gap-2">
+            <span className="shrink-0 text-white/25">{l.t}</span>
+            <span className={`shrink-0 ${kindCls[l.kind]}`}>{kindPfx[l.kind]}</span>
+            <span className={kindCls[l.kind]}>{l.msg}</span>
+          </div>
+        ))}
+        <div ref={bottomRef} />
+      </div>
+    </div>
+  );
+}
+
+// ─── Main pipeline ────────────────────────────────────────────────────────────
+
 export function SourceRewriterPipeline() {
   const fileRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
@@ -224,15 +293,18 @@ export function SourceRewriterPipeline() {
     "idle" | "extracting" | "rewriting" | "error"
   >("idle");
   const [extracted, setExtracted] = useState<ExtractedSource | null>(null);
-  const [editedSource, setEditedSource] = useState<ExtractedSource | null>(
-    null
-  );
+  const [editedSource, setEditedSource] = useState<ExtractedSource | null>(null);
   const [settings, setSettings] = useState<RewriteSettings>(defaultSettings);
   const [rewritten, setRewritten] = useState<RewrittenSource | null>(null);
   const [errorText, setErrorText] = useState<string | null>(null);
+  const [logLines, setLogLines] = useState<LogLine[]>([]);
 
   const showExtracted = extracted !== null && editedSource !== null;
   const showRewritten = rewritten !== null;
+
+  const pushLog = (msg: string, kind: LogKind = "info") => {
+    setLogLines((prev) => [...prev, { t: nowHMS(), msg, kind }]);
+  };
 
   const runExtract = async () => {
     if (!file) return;
@@ -241,7 +313,24 @@ export function SourceRewriterPipeline() {
     setExtracted(null);
     setEditedSource(null);
     setRewritten(null);
+    setLogLines([]);
     setStatus("extracting");
+
+    const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
+    const sizeMB = (file.size / 1024 / 1024).toFixed(2);
+
+    pushLog(`Файл: ${file.name} (${sizeMB} MB, .${ext})`, "info");
+    pushLog("Отправляю запрос на сервер...", "step");
+
+    if (isVideoFile(file)) {
+      pushLog("Ожидаю: конвертация видео → MP3 (ffmpeg)...", "info");
+      pushLog("Ожидаю: транскрипция MP3 → текст (Groq Whisper)...", "info");
+    } else if (isAudioFile(file)) {
+      pushLog("Ожидаю: транскрипция аудио → текст (Groq Whisper)...", "info");
+    }
+
+    const t0 = Date.now();
+
     try {
       const fd = new FormData();
       fd.append("file", file);
@@ -249,21 +338,44 @@ export function SourceRewriterPipeline() {
         method: "POST",
         body: fd,
       });
+
+      const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+      pushLog(`Ответ от сервера: HTTP ${r.status} (${elapsed}s)`, r.ok ? "info" : "err");
+
       const data = (await r.json()) as ExtractedSource & {
         error?: string;
         detail?: string;
         raw?: string;
+        step?: string;
+        reqId?: string;
       };
+
       if (!r.ok) {
-        const msg = [data.error, data.detail, data.raw].filter(Boolean).join(" — ");
+        // Детальный разбор ошибки
+        if (data.reqId) pushLog(`reqId: ${data.reqId}`, "warn");
+        if (data.step)  pushLog(`Шаг сбоя: ${data.step}`, "warn");
+        if (data.error) pushLog(`Ошибка: ${data.error}`, "err");
+        if (data.detail) pushLog(`Детали: ${data.detail}`, "err");
+        if (data.raw)   pushLog(`Raw: ${data.raw.slice(0, 300)}`, "warn");
+        const msg = [data.error, data.detail].filter(Boolean).join(" — ");
         throw new Error(msg || `HTTP ${r.status}`);
       }
+
+      const chars = data.fullRawText?.length ?? 0;
+      pushLog(`Извлечено: ${chars} символов`, "ok");
+      if (data.transcript) pushLog(`Транскрипт: ${data.transcript.length} символов`, "ok");
+      pushLog("Готово ✓", "ok");
+
       setExtracted(data);
       setEditedSource(structuredClone(data));
       setStatus("idle");
     } catch (e) {
       setStatus("error");
-      setErrorText(e instanceof Error ? e.message : String(e));
+      const msg = e instanceof Error ? e.message : String(e);
+      if (!logLines.some((l) => l.kind === "err")) {
+        pushLog(msg, "err");
+      }
+      setErrorText(msg);
     }
   };
 
@@ -271,29 +383,33 @@ export function SourceRewriterPipeline() {
     if (!extracted || !editedSource) return;
     setErrorText(null);
     setStatus("rewriting");
+    pushLog("Отправляю на рерайт...", "step");
+    const t0 = Date.now();
     try {
       const r = await fetch("/wb/source-rewriter/rewrite", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          extractedSource: extracted,
-          editedSource,
-          settings,
-        }),
+        body: JSON.stringify({ extractedSource: extracted, editedSource, settings }),
       });
+      const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+      pushLog(`Рерайт: HTTP ${r.status} (${elapsed}s)`, r.ok ? "ok" : "err");
+
       const data = (await r.json()) as RewrittenSource & {
         error?: string;
         raw?: string;
       };
       if (!r.ok) {
         const msg = [data.error, data.raw].filter(Boolean).join(" — ");
+        pushLog(msg || `HTTP ${r.status}`, "err");
         throw new Error(msg || `HTTP ${r.status}`);
       }
+      pushLog("Рерайт завершён ✓", "ok");
       setRewritten(data);
       setStatus("idle");
     } catch (e) {
       setStatus("error");
-      setErrorText(e instanceof Error ? e.message : String(e));
+      const msg = e instanceof Error ? e.message : String(e);
+      setErrorText(msg);
     }
   };
 
@@ -306,6 +422,7 @@ export function SourceRewriterPipeline() {
     setSettings(defaultSettings);
     setErrorText(null);
     setStatus("idle");
+    setLogLines([]);
     if (fileRef.current) fileRef.current.value = "";
   };
 
@@ -361,6 +478,8 @@ export function SourceRewriterPipeline() {
           )}
           {status === "extracting" ? "Извлекаю…" : "Извлечь"}
         </button>
+
+        <LogConsole lines={logLines} />
       </section>
 
       {/* 2. Extracted Source */}
