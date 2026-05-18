@@ -7,6 +7,10 @@ import {
   Send,
   Sparkles,
 } from "lucide-react";
+import { AgentsHubCard } from "./AgentsHubCard";
+import { AgentsHubPanel } from "./AgentsHubPanel";
+import { fetchAgents, fetchBrainState } from "./brainApi";
+import type { BrainState } from "./brainTypes";
 import { CarouselRemixPanel } from "./CarouselRemixPanel";
 import { FreedzPanel } from "./FreedzPanel";
 import { SourceRewriterPanel } from "./SourceRewriterPanel";
@@ -25,6 +29,11 @@ export default function App() {
   const [openFreedz, setOpenFreedz] = useState(false);
   const [openCarouselRemix, setOpenCarouselRemix] = useState(false);
   const [openSourceRewriter, setOpenSourceRewriter] = useState(false);
+  const [openAgentsHub, setOpenAgentsHub] = useState(false);
+  const [brainState, setBrainState] = useState<BrainState | null>(null);
+  const [agentsCount, setAgentsCount] = useState(0);
+  const [brainLoading, setBrainLoading] = useState(false);
+  const [brainError, setBrainError] = useState<string | null>(null);
 
   const loadFreedz = useCallback(async () => {
     try {
@@ -44,6 +53,47 @@ export default function App() {
   useEffect(() => {
     void loadFreedz();
   }, [loadFreedz]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadAgentsHubSummary() {
+      setBrainLoading(true);
+      setBrainError(null);
+
+      try {
+        const [nextState, nextAgents] = await Promise.all([
+          fetchBrainState(),
+          fetchAgents(),
+        ]);
+
+        if (cancelled) {
+          return;
+        }
+
+        setBrainState(nextState);
+        setAgentsCount(nextAgents.length);
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+
+        setBrainError(
+          error instanceof Error ? error.message : "Failed to load Agents Hub"
+        );
+      } finally {
+        if (!cancelled) {
+          setBrainLoading(false);
+        }
+      }
+    }
+
+    void loadAgentsHubSummary();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   return (
     <div className="min-h-svh">
@@ -78,6 +128,13 @@ export default function App() {
           </span>
         </div>
         <div className="grid gap-4 md:grid-cols-2">
+          <AgentsHubCard
+            state={brainState}
+            agentsCount={agentsCount}
+            loading={brainLoading}
+            error={brainError}
+            onOpen={() => setOpenAgentsHub(true)}
+          />
           <TrackerTile />
           <FreedzCard
             onOpen={() => {
@@ -111,6 +168,12 @@ export default function App() {
       {openSourceRewriter && (
         <SourceRewriterPanel onClose={() => setOpenSourceRewriter(false)} />
       )}
+      {openAgentsHub ? (
+        <AgentsHubPanel
+          onClose={() => setOpenAgentsHub(false)}
+          onStateUpdated={setBrainState}
+        />
+      ) : null}
     </div>
   );
 }
