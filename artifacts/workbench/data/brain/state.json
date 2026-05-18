@@ -137,15 +137,15 @@
     },
     {
       "id": "task-104",
-      "title": "Спросить Content Strategy агента: план контента на эту неделю",
+      "title": "Обновить prompts агентов при необходимости (agents.json)",
       "status": "todo",
-      "source": "agents_hub"
+      "source": "manual"
     },
     {
       "id": "task-105",
-      "title": "Настроить ANTHROPIC_API_KEY в среде для активации агентов",
+      "title": "Обновить state (dailyTasks, focusWeek) под новый день",
       "status": "todo",
-      "source": "workbench_launch"
+      "source": "manual"
     }
   ],
   "frozen": {
