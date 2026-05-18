@@ -569,7 +569,13 @@ export function AgentsHubPanel({
               {wfActive?.status === "failed" && wfActive.error ? (
                 <div className="mt-2 rounded-xl border border-red-400/20 bg-red-950/20 p-3">
                   <p className="text-xs font-semibold text-red-300">Ошибка</p>
-                  <p className="mt-1 text-sm text-red-200">{wfActive.error}</p>
+                  <div className="mt-1">
+                    {/REVIEW_STATUS:/i.test(wfActive.error) ? (
+                      <ReviewMessageBlock text={wfActive.error} />
+                    ) : (
+                      <p className="text-sm text-red-200">{wfActive.error}</p>
+                    )}
+                  </div>
                 </div>
               ) : null}
             </div>
