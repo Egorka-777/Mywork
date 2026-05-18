@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "updatedAt": null,
+  "goalYear": {
+    "title": "1 млн в месяц",
+    "description": "Построить систему контента, продуктов, продаж и рабочих процессов вокруг заработка на нейросетях.",
+    "status": "active"
+  },
+  "focusQuarter": {
+    "title": "Собрать управляемую рабочую систему",
+    "description": "Workbench должен стать местом, где видны ежедневные задачи, агенты, решения и накопленный контекст.",
+    "status": "active"
+  },
+  "focusWeek": {
+    "title": "Запустить Agents Hub в workbench",
+    "description": "Добавить большую плитку с агентами, ежедневной сводкой и файловым мозгом.",
+    "status": "active"
+  },
+  "activeProducts": [],
+  "activeFunnel": {
+    "status": "draft",
+    "notes": []
+  },
+  "dailyTasks": [
+    {
+      "id": "task-001",
+      "title": "Опубликовать контент",
+      "status": "todo",
+      "source": "manual"
+    },
+    {
+      "id": "task-002",
+      "title": "Подготовить следующий материал",
+      "status": "todo",
+      "source": "manual"
+    },
+    {
+      "id": "task-003",
+      "title": "Проверить задачи по сайту / рабочей среде",
+      "status": "todo",
+      "source": "manual"
+    }
+  ],
+  "frozen": {
+    "doNotTouch": [
+      "Не трогать старые четыре плитки до отдельного прохода.",
+      "Не подключать PostgreSQL/Drizzle к workbench.",
+      "Не менять Creovix.",
+      "Не менять api-server, upload/proxy/payload logic без прямой причины.",
+      "Не путать telegram-rewriter/state.json с artifacts/workbench/data/brain/state.json."
+    ]
+  }
+}
