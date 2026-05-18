@@ -1,72 +1,46 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AgentWorkflow } from "./brainTypes";
-import { createWorkflowPlan, fetchWorkflows } from "./brainApi";
+import type { ActivityEntry, AgentWorkflow } from "./brainTypes";
+import {
+  createWorkflowPlan,
+  fetchWorkflow,
+  fetchWorkflows,
+  startWorkflow,
+} from "./brainApi";
 
-type LiveEventType =
-  | "workflow_started"
-  | "step_started"
-  | "step_thinking"
-  | "step_output"
-  | "review_started"
-  | "review_output"
-  | "revision_started"
-  | "revision_output"
-  | "step_completed"
-  | "step_failed"
-  | "workflow_completed"
-  | "workflow_failed";
-
-type LiveEvent = {
-  type: LiveEventType;
-  ts: string;
-  agentKey: string;
-  stepTitle?: string;
-  stepIndex?: number;
-  totalSteps?: number;
-  text?: string;
-  reviewStatus?: string;
-  workflowStatus?: string;
-  finalResult?: string;
-  error?: string;
-};
-
-type LogEntry = LiveEvent & { id: string };
-
-const AGENT_COLORS: Record<string, string> = {
-  ceo: "text-cyan-300",
-  operations: "text-violet-300",
-  funnel: "text-amber-300",
-  content_strategy: "text-emerald-300",
-  rewriter: "text-pink-300",
-  tech_architect: "text-sky-300",
+const AGENT_COLORS: Record<string, { bubble: string; name: string; dot: string }> = {
+  ceo:              { bubble: "bg-cyan-950/60 border-cyan-500/25",    name: "text-cyan-300",   dot: "bg-cyan-400"   },
+  operations:       { bubble: "bg-violet-950/60 border-violet-500/25", name: "text-violet-300", dot: "bg-violet-400" },
+  funnel:           { bubble: "bg-amber-950/60 border-amber-500/25",   name: "text-amber-300",  dot: "bg-amber-400"  },
+  content_strategy: { bubble: "bg-emerald-950/60 border-emerald-500/25", name: "text-emerald-300", dot: "bg-emerald-400" },
+  rewriter:         { bubble: "bg-pink-950/60 border-pink-500/25",     name: "text-pink-300",   dot: "bg-pink-400"   },
+  tech_architect:   { bubble: "bg-sky-950/60 border-sky-500/25",       name: "text-sky-300",    dot: "bg-sky-400"    },
+  system:           { bubble: "bg-white/[0.04] border-white/10",       name: "text-slate-400",  dot: "bg-slate-400"  },
 };
 
 const AGENT_LABELS: Record<string, string> = {
   ceo: "CEO",
   operations: "Operations",
   funnel: "Funnel",
-  content_strategy: "Content",
+  content_strategy: "Контент",
   rewriter: "Rewriter",
   tech_architect: "Tech Arch",
+  system: "Система",
 };
 
-const EVENT_ICONS: Record<LiveEventType, string> = {
-  workflow_started: "▶",
-  step_started: "→",
-  step_thinking: "…",
-  step_output: "💬",
-  review_started: "🔍",
-  review_output: "📋",
-  revision_started: "🔄",
-  revision_output: "✏️",
-  step_completed: "✓",
-  step_failed: "✗",
-  workflow_completed: "✅",
-  workflow_failed: "❌",
+const PHASE_ICONS: Record<string, string> = {
+  system:   "▶",
+  reading:  "📖",
+  thinking: "💭",
+  output:   "💬",
+  sending:  "→",
+  review:   "🔍",
+  revision: "🔄",
+  done:     "✓",
+  error:    "✗",
 };
 
-function agentColor(key: string) {
-  return AGENT_COLORS[key] ?? "text-slate-300";
+function agentStyle(key: string) {
+  return AGENT_COLORS[key] ?? AGENT_COLORS.system;
 }
 
 function agentLabel(key: string) {
@@ -95,19 +69,17 @@ export function WorkflowLivePanel({ onClose }: WorkflowLivePanelProps) {
   const [planning, setPlanning] = useState(false);
   const [running, setRunning] = useState(false);
   const [activeWorkflow, setActiveWorkflow] = useState<AgentWorkflow | null>(null);
-  const [log, setLog] = useState<LogEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [pastWorkflows, setPastWorkflows] = useState<AgentWorkflow[]>([]);
   const [loadingPast, setLoadingPast] = useState(false);
   const [expandedStep, setExpandedStep] = useState<string | null>(null);
 
-  const sseRef = useRef<EventSource | null>(null);
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const logEndRef = useRef<HTMLDivElement>(null);
-  const idxRef = useRef(0);
 
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [log]);
+  }, [activeWorkflow?.activityLog?.length, activeWorkflow?.currentActivity]);
 
   useEffect(() => {
     setLoadingPast(true);
@@ -117,19 +89,34 @@ export function WorkflowLivePanel({ onClose }: WorkflowLivePanelProps) {
       .finally(() => setLoadingPast(false));
   }, []);
 
-  const stopSSE = useCallback(() => {
-    if (sseRef.current) {
-      sseRef.current.close();
-      sseRef.current = null;
+  const stopPolling = useCallback(() => {
+    if (pollingRef.current !== null) {
+      clearInterval(pollingRef.current);
+      pollingRef.current = null;
     }
   }, []);
 
-  useEffect(() => () => stopSSE(), [stopSSE]);
+  useEffect(() => () => stopPolling(), [stopPolling]);
 
-  function addLog(event: LiveEvent) {
-    idxRef.current += 1;
-    setLog((prev) => [...prev, { ...event, id: `${Date.now()}-${idxRef.current}` }]);
-  }
+  const startPolling = useCallback(
+    (workflowId: string) => {
+      stopPolling();
+      pollingRef.current = setInterval(async () => {
+        try {
+          const wf = await fetchWorkflow(workflowId);
+          setActiveWorkflow(wf);
+          if (wf.status === "completed" || wf.status === "failed") {
+            setRunning(false);
+            stopPolling();
+            fetchWorkflows(10).then(setPastWorkflows).catch(() => {});
+          }
+        } catch {
+          // keep polling on transient errors
+        }
+      }, 1500);
+    },
+    [stopPolling]
+  );
 
   async function handlePlan() {
     const t = title.trim();
@@ -140,7 +127,6 @@ export function WorkflowLivePanel({ onClose }: WorkflowLivePanelProps) {
     }
     setError(null);
     setPlanning(true);
-    setLog([]);
     setActiveWorkflow(null);
     try {
       const wf = await createWorkflowPlan({ title: t, userRequest: r });
@@ -152,61 +138,39 @@ export function WorkflowLivePanel({ onClose }: WorkflowLivePanelProps) {
     }
   }
 
-  function handleRun() {
+  async function handleRun() {
     if (!activeWorkflow?.id) return;
-    stopSSE();
-    setLog([]);
-    setRunning(true);
     setError(null);
-
-    const es = new EventSource(`/wb/workflows/${encodeURIComponent(activeWorkflow.id)}/stream`);
-    sseRef.current = es;
-
-    es.addEventListener("live", (e: MessageEvent) => {
-      try {
-        const event = JSON.parse(e.data as string) as LiveEvent;
-        addLog(event);
-
-        if (
-          event.type === "workflow_completed" ||
-          event.type === "workflow_failed"
-        ) {
-          setRunning(false);
-          stopSSE();
-          fetchWorkflows(10).then(setPastWorkflows).catch(() => {});
-        }
-      } catch {
-        // ignore parse errors
-      }
-    });
-
-    es.addEventListener("done", () => {
+    setRunning(true);
+    try {
+      await startWorkflow(activeWorkflow.id);
+      startPolling(activeWorkflow.id);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
       setRunning(false);
-      stopSSE();
-    });
-
-    es.onerror = () => {
-      setError("Соединение прервано");
-      setRunning(false);
-      stopSSE();
-    };
+    }
   }
 
   function handleStop() {
-    stopSSE();
+    stopPolling();
     setRunning(false);
   }
 
   function loadPastWorkflow(wf: AgentWorkflow) {
+    stopPolling();
+    setRunning(false);
     setActiveWorkflow(wf);
     setTitle(wf.title);
     setRequest(wf.userRequest);
-    setLog([]);
     setError(null);
   }
 
   const isRunnable =
-    !!activeWorkflow?.id && activeWorkflow.status === "planned" && !running;
+    !!activeWorkflow?.id &&
+    (activeWorkflow.status === "planned" || activeWorkflow.status === "draft") &&
+    !running;
+
+  const activityLog: ActivityEntry[] = activeWorkflow?.activityLog ?? [];
 
   return (
     <div
@@ -219,10 +183,10 @@ export function WorkflowLivePanel({ onClose }: WorkflowLivePanelProps) {
           <header className="flex shrink-0 items-center justify-between gap-4 border-b border-white/10 px-5 py-4">
             <div>
               <h2 className="text-xl font-semibold text-white">
-                Workflow Live — цепочка агентов
+                Workflow — цепочка агентов
               </h2>
               <p className="mt-0.5 text-sm text-slate-400">
-                Все агенты работают в реальном времени — видишь каждое сообщение
+                Видишь каждое действие агентов в реальном времени
               </p>
             </div>
             <button
@@ -234,8 +198,10 @@ export function WorkflowLivePanel({ onClose }: WorkflowLivePanelProps) {
             </button>
           </header>
 
-          <div className="grid gap-6 p-5 md:grid-cols-[minmax(280px,340px)_1fr]">
-            <aside className="flex flex-col gap-5">
+          <div className="grid gap-6 p-5 md:grid-cols-[minmax(280px,320px)_1fr]">
+            {/* ─── Left sidebar ─────────────────────────────────── */}
+            <aside className="flex flex-col gap-4">
+              {/* New task form */}
               <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
                 <h3 className="mb-3 text-sm font-semibold text-white">Новая задача</h3>
                 {error ? (
@@ -249,7 +215,7 @@ export function WorkflowLivePanel({ onClose }: WorkflowLivePanelProps) {
                     type="text"
                     value={title}
                     onChange={(e) => setTitle(e.target.value)}
-                    disabled={running}
+                    disabled={running || planning}
                     className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-sm text-white disabled:opacity-50"
                     placeholder="Краткий заголовок…"
                   />
@@ -259,7 +225,7 @@ export function WorkflowLivePanel({ onClose }: WorkflowLivePanelProps) {
                   <textarea
                     value={request}
                     onChange={(e) => setRequest(e.target.value)}
-                    disabled={running}
+                    disabled={running || planning}
                     rows={4}
                     className="w-full resize-none rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-sm text-white disabled:opacity-50"
                     placeholder="Что нужно сделать команде агентов…"
@@ -285,7 +251,7 @@ export function WorkflowLivePanel({ onClose }: WorkflowLivePanelProps) {
                   ) : (
                     <button
                       type="button"
-                      onClick={handleRun}
+                      onClick={() => void handleRun()}
                       disabled={!isRunnable}
                       className="rounded-full border border-white/20 px-4 py-2 text-sm font-medium text-white transition hover:bg-white/10 disabled:opacity-50"
                     >
@@ -295,15 +261,17 @@ export function WorkflowLivePanel({ onClose }: WorkflowLivePanelProps) {
                 </div>
               </div>
 
+              {/* CEO plan */}
               {activeWorkflow?.ceoPlan ? (
                 <div className="rounded-2xl border border-cyan-500/20 bg-cyan-950/20 p-4">
-                  <p className="mb-2 text-xs font-semibold text-cyan-300">План CEO</p>
+                  <p className="mb-2 text-xs font-semibold text-cyan-300">📋 План CEO</p>
                   <pre className="max-h-40 overflow-y-auto whitespace-pre-wrap text-xs text-slate-200">
                     {activeWorkflow.ceoPlan}
                   </pre>
                 </div>
               ) : null}
 
+              {/* Steps */}
               {activeWorkflow && activeWorkflow.steps.length > 0 ? (
                 <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
                   <p className="mb-2 text-xs font-semibold text-slate-400">
@@ -311,28 +279,39 @@ export function WorkflowLivePanel({ onClose }: WorkflowLivePanelProps) {
                   </p>
                   <ul className="space-y-1.5">
                     {activeWorkflow.steps.map((step, i) => {
-                      const statusColor =
-                        step.status === "completed"
-                          ? "text-emerald-400"
-                          : step.status === "running" || step.status === "reviewing"
-                          ? "text-cyan-300 animate-pulse"
-                          : step.status === "failed" || step.status === "revision_required"
-                          ? "text-red-400"
-                          : "text-slate-500";
+                      const isActive =
+                        step.status === "running" || step.status === "reviewing";
+                      const isDone = step.status === "completed";
+                      const isFailed =
+                        step.status === "failed" ||
+                        step.status === "revision_required";
+                      const st = agentStyle(step.agentKey);
                       return (
                         <li key={step.id}>
                           <button
                             type="button"
                             onClick={() =>
-                              setExpandedStep(expandedStep === step.id ? null : step.id)
+                              setExpandedStep(
+                                expandedStep === step.id ? null : step.id
+                              )
                             }
                             className="w-full rounded-lg border border-white/10 bg-black/10 px-2 py-1.5 text-left transition hover:bg-white/5"
                           >
                             <div className="flex items-center gap-2">
-                              <span className={`text-xs font-mono ${statusColor}`}>
-                                [{i + 1}]
-                              </span>
-                              <span className={`text-xs font-medium ${agentColor(step.agentKey)}`}>
+                              <span
+                                className={`h-2 w-2 shrink-0 rounded-full ${
+                                  isActive
+                                    ? `${st.dot} animate-pulse`
+                                    : isDone
+                                    ? "bg-emerald-400"
+                                    : isFailed
+                                    ? "bg-red-400"
+                                    : "bg-slate-600"
+                                }`}
+                              />
+                              <span
+                                className={`text-xs font-semibold ${st.name}`}
+                              >
                                 {agentLabel(step.agentKey)}
                               </span>
                               <span className="truncate text-xs text-slate-300">
@@ -340,7 +319,7 @@ export function WorkflowLivePanel({ onClose }: WorkflowLivePanelProps) {
                               </span>
                             </div>
                             {step.reviewerKey ? (
-                              <p className="mt-0.5 text-[10px] text-slate-500">
+                              <p className="mt-0.5 pl-4 text-[10px] text-slate-500">
                                 rev: {agentLabel(step.reviewerKey)}
                               </p>
                             ) : null}
@@ -364,6 +343,7 @@ export function WorkflowLivePanel({ onClose }: WorkflowLivePanelProps) {
                 </div>
               ) : null}
 
+              {/* Past workflows */}
               {!loadingPast && pastWorkflows.length > 0 ? (
                 <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
                   <p className="mb-2 text-xs font-semibold text-slate-400">
@@ -384,6 +364,8 @@ export function WorkflowLivePanel({ onClose }: WorkflowLivePanelProps) {
                                 ? "text-emerald-400"
                                 : wf.status === "failed"
                                 ? "text-red-400"
+                                : wf.status === "running"
+                                ? "text-cyan-400"
                                 : "text-slate-500"
                             }
                           >
@@ -398,42 +380,75 @@ export function WorkflowLivePanel({ onClose }: WorkflowLivePanelProps) {
               ) : null}
             </aside>
 
+            {/* ─── Right: live activity chat ─────────────────────── */}
             <div className="flex flex-col gap-4">
-              <div className="flex min-h-[480px] flex-col rounded-2xl border border-white/10 bg-black/30">
+              <div className="flex min-h-[520px] flex-col rounded-2xl border border-white/10 bg-black/30">
+                {/* Chat header */}
                 <div className="flex items-center justify-between border-b border-white/10 px-4 py-2.5">
                   <p className="text-sm font-semibold text-white">
-                    Live лог агентов
+                    Живой чат агентов
                   </p>
-                  {running ? (
-                    <span className="flex items-center gap-1.5 text-xs text-cyan-300">
-                      <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-cyan-400" />
-                      Работают…
-                    </span>
-                  ) : log.length > 0 ? (
-                    <span className="text-xs text-slate-500">{log.length} событий</span>
-                  ) : null}
+                  <div className="flex items-center gap-3">
+                    {running ? (
+                      <span className="flex items-center gap-1.5 text-xs text-cyan-300">
+                        <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-cyan-400" />
+                        Работают…
+                      </span>
+                    ) : activityLog.length > 0 ? (
+                      <span className="text-xs text-slate-500">
+                        {activityLog.length} действий
+                      </span>
+                    ) : null}
+                    {activeWorkflow?.status ? (
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                          activeWorkflow.status === "completed"
+                            ? "bg-emerald-500/20 text-emerald-300"
+                            : activeWorkflow.status === "failed"
+                            ? "bg-red-500/20 text-red-300"
+                            : activeWorkflow.status === "running"
+                            ? "bg-cyan-500/20 text-cyan-300"
+                            : "bg-white/10 text-slate-400"
+                        }`}
+                      >
+                        {activeWorkflow.status}
+                      </span>
+                    ) : null}
+                  </div>
                 </div>
 
-                <div className="min-h-0 flex-1 overflow-y-auto p-4 space-y-2">
-                  {log.length === 0 ? (
-                    <p className="text-sm text-slate-500">
-                      {running
-                        ? "Агенты запускаются…"
-                        : "Нажми «Разобрать задачу» → «Запустить ▶» чтобы увидеть живой поток"}
-                    </p>
+                {/* Chat messages */}
+                <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3 space-y-2">
+                  {activityLog.length === 0 ? (
+                    <div className="flex h-full items-center justify-center">
+                      <p className="text-center text-sm text-slate-500">
+                        {planning
+                          ? "CEO разбирает задачу…"
+                          : running
+                          ? "Агенты запускаются…"
+                          : "Нажми «Разобрать задачу» → «Запустить ▶»\nчтобы увидеть живой поток агентов"}
+                      </p>
+                    </div>
                   ) : (
-                    log.map((entry) => (
-                      <LogEntryRow key={entry.id} entry={entry} />
-                    ))
+                    <>
+                      {activityLog.map((entry) => (
+                        <ActivityBubble key={entry.id} entry={entry} />
+                      ))}
+                      {/* Typing indicator */}
+                      {running && activeWorkflow?.currentActivity ? (
+                        <TypingIndicator text={activeWorkflow.currentActivity} />
+                      ) : null}
+                    </>
                   )}
                   <div ref={logEndRef} />
                 </div>
               </div>
 
+              {/* Final result */}
               {activeWorkflow?.finalResult ? (
                 <div className="rounded-2xl border border-emerald-500/25 bg-emerald-950/30 p-4">
                   <p className="mb-2 text-sm font-semibold text-emerald-300">
-                    Финальный результат
+                    ✅ Финальный результат
                   </p>
                   <pre className="max-h-64 overflow-y-auto whitespace-pre-wrap text-sm text-white">
                     {activeWorkflow.finalResult}
@@ -441,6 +456,7 @@ export function WorkflowLivePanel({ onClose }: WorkflowLivePanelProps) {
                 </div>
               ) : null}
 
+              {/* Error */}
               {activeWorkflow?.status === "failed" && activeWorkflow.error ? (
                 <div className="rounded-2xl border border-red-400/20 bg-red-950/30 p-4">
                   <p className="mb-1 text-sm font-semibold text-red-300">Ошибка</p>
@@ -455,79 +471,77 @@ export function WorkflowLivePanel({ onClose }: WorkflowLivePanelProps) {
   );
 }
 
-function LogEntryRow({ entry }: { entry: LogEntry }) {
+function ActivityBubble({ entry }: { entry: ActivityEntry }) {
   const [expanded, setExpanded] = useState(false);
-  const icon = EVENT_ICONS[entry.type] ?? "·";
-  const color = agentColor(entry.agentKey);
+  const st = agentStyle(entry.agentKey);
+  const icon = PHASE_ICONS[entry.phase] ?? "·";
   const label = agentLabel(entry.agentKey);
-  const hasText = !!entry.text && entry.text.length > 0;
-  const isLong = hasText && entry.text!.length > 200;
+  const isSystem = entry.agentKey === "system";
+  const isOutput = entry.phase === "output" || entry.phase === "review";
+  const isLong = entry.text.length > 260;
 
-  const bgClass =
-    entry.type === "workflow_completed"
-      ? "border-emerald-500/20 bg-emerald-950/20"
-      : entry.type === "workflow_failed" || entry.type === "step_failed"
-      ? "border-red-400/20 bg-red-950/20"
-      : entry.type === "review_output"
-      ? "border-amber-400/15 bg-amber-950/10"
-      : entry.type === "step_output" || entry.type === "revision_output"
-      ? "border-white/10 bg-white/[0.04]"
-      : "border-transparent bg-transparent";
+  if (isSystem) {
+    return (
+      <div className="flex items-center justify-center gap-2 py-1">
+        <span className="text-xs text-slate-500">{icon}</span>
+        <span className="text-xs text-slate-500">{entry.text}</span>
+        <span className="text-[10px] text-slate-700">{formatTime(entry.ts)}</span>
+      </div>
+    );
+  }
 
   return (
-    <div className={`rounded-xl border px-3 py-2 ${bgClass}`}>
-      <div className="flex items-start gap-2">
-        <span className="mt-0.5 shrink-0 text-base leading-none">{icon}</span>
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className={`text-xs font-semibold ${color}`}>{label}</span>
-            {entry.stepTitle ? (
-              <span className="text-xs text-slate-400">· {entry.stepTitle}</span>
-            ) : null}
-            {entry.reviewStatus ? (
-              <span
-                className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
-                  entry.reviewStatus === "passed"
-                    ? "bg-emerald-500/20 text-emerald-300"
-                    : entry.reviewStatus === "failed"
-                    ? "bg-red-500/20 text-red-300"
-                    : "bg-slate-500/20 text-slate-400"
-                }`}
-              >
-                {entry.reviewStatus}
-              </span>
-            ) : null}
-            <span className="ml-auto text-[10px] text-slate-600">
-              {formatTime(entry.ts)}
-            </span>
-          </div>
+    <div className={`rounded-xl border px-3 py-2.5 ${st.bubble}`}>
+      <div className="mb-1.5 flex items-center gap-2">
+        <span className="text-sm leading-none">{icon}</span>
+        <span className={`text-xs font-semibold ${st.name}`}>{label}</span>
+        <span className="ml-auto text-[10px] text-slate-600">
+          {formatTime(entry.ts)}
+        </span>
+      </div>
 
-          {hasText ? (
-            <div className="mt-1">
-              <pre
-                className={`whitespace-pre-wrap text-xs text-slate-200 ${
-                  !expanded && isLong ? "line-clamp-4" : ""
-                }`}
-              >
-                {entry.text}
-              </pre>
-              {isLong ? (
-                <button
-                  type="button"
-                  onClick={() => setExpanded((v) => !v)}
-                  className="mt-1 text-[10px] text-cyan-400 hover:underline"
-                >
-                  {expanded ? "Свернуть" : "Развернуть"}
-                </button>
-              ) : null}
-            </div>
-          ) : null}
-
-          {entry.error ? (
-            <p className="mt-1 text-xs text-red-300">{entry.error}</p>
+      {entry.text ? (
+        <div>
+          <pre
+            className={`whitespace-pre-wrap text-xs leading-relaxed text-slate-200 ${
+              !expanded && isLong ? "line-clamp-5" : ""
+            } ${isOutput ? "text-slate-100" : "text-slate-400 italic"}`}
+          >
+            {entry.text}
+          </pre>
+          {isLong ? (
+            <button
+              type="button"
+              onClick={() => setExpanded((v) => !v)}
+              className="mt-1.5 text-[10px] text-cyan-400 hover:underline"
+            >
+              {expanded ? "Свернуть ▲" : "Развернуть ▼"}
+            </button>
           ) : null}
         </div>
-      </div>
+      ) : null}
+    </div>
+  );
+}
+
+function TypingIndicator({ text }: { text: string }) {
+  return (
+    <div className="flex items-center gap-2 rounded-xl border border-white/5 bg-white/[0.02] px-3 py-2">
+      <span className="flex gap-1">
+        <span
+          className="inline-block h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400"
+          style={{ animationDelay: "0ms" }}
+        />
+        <span
+          className="inline-block h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400"
+          style={{ animationDelay: "150ms" }}
+        />
+        <span
+          className="inline-block h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400"
+          style={{ animationDelay: "300ms" }}
+        />
+      </span>
+      <span className="text-xs text-slate-500 italic">{text}</span>
     </div>
   );
 }

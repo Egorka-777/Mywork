@@ -180,6 +180,16 @@ export async function runWorkflow(workflowId: string): Promise<AgentWorkflow> {
   return response.workflow;
 }
 
+export async function startWorkflow(
+  workflowId: string
+): Promise<{ workflowId: string; status: string }> {
+  const safeId = encodeURIComponent(assertNonEmptyString(workflowId, "workflowId"));
+  return requestJson<{ workflowId: string; status: string }>(
+    `/wb/workflows/${safeId}/start`,
+    { method: "POST" }
+  );
+}
+
 export async function fetchWorkflow(workflowId: string): Promise<AgentWorkflow> {
   const safeId = encodeURIComponent(assertNonEmptyString(workflowId, "workflowId"));
   const response = await requestJson<WorkflowResponse>(

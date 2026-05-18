@@ -24,7 +24,7 @@ import {
   listWorkflows,
   readWorkflow,
   runWorkflow,
-  type WorkflowLiveEvent,
+  startWorkflowBackground,
 } from "./agentWorkflow";
 import {
   ExtractError,
@@ -1309,48 +1309,20 @@ app.post("/wb/workflows/:id/run", async (req, res) => {
   }
 });
 
-app.get("/wb/workflows/:id/stream", async (req, res) => {
+app.post("/wb/workflows/:id/start", async (req, res) => {
   if (!OPENROUTER_KEY) {
-    res.status(503).json({ error: "OPENROUTER_API_KEY not configured" });
-    return;
+    return res.status(503).json({ error: "OPENROUTER_API_KEY not configured" });
   }
-
-  res.setHeader("Content-Type", "text/event-stream");
-  res.setHeader("Cache-Control", "no-cache");
-  res.setHeader("Connection", "keep-alive");
-  res.flushHeaders();
-
-  let closed = false;
-  req.on("close", () => { closed = true; });
-
-  const sendEvent = (data: WorkflowLiveEvent) => {
-    if (closed) return;
-    res.write(`event: live\ndata: ${JSON.stringify(data)}\n\n`);
-  };
-
-  const sendDone = () => {
-    if (closed) return;
-    res.write(`event: done\ndata: {}\n\n`);
-    res.end();
-  };
-
   try {
-    await runWorkflow({
-      workflowId: req.params.id,
-      llm: workflowLlm,
-      onEvent: sendEvent,
-    });
+    const workflow = await readWorkflow(req.params.id);
+    if (workflow.status === "running") {
+      return res.status(409).json({ error: "Workflow already running" });
+    }
+    startWorkflowBackground({ workflowId: req.params.id, llm: workflowLlm });
+    return res.json({ workflowId: req.params.id, status: "started" });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
-    sendEvent({
-      type: "workflow_failed",
-      ts: new Date().toISOString(),
-      agentKey: "ceo",
-      error: message,
-      workflowStatus: "failed",
-    });
-  } finally {
-    sendDone();
+    return res.status(500).json({ error: message });
   }
 });
 

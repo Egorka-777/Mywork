@@ -133,6 +133,25 @@ export type WorkflowMemoryEvent = {
   body: string;
 };
 
+export type ActivityPhase =
+  | "system"
+  | "reading"
+  | "thinking"
+  | "output"
+  | "sending"
+  | "review"
+  | "revision"
+  | "done"
+  | "error";
+
+export type ActivityEntry = {
+  id: string;
+  ts: string;
+  agentKey: string;
+  phase: ActivityPhase;
+  text: string;
+};
+
 export type AgentWorkflowStep = {
   id: string;
   agentKey: WorkflowAgentKey;
@@ -160,6 +179,8 @@ export type AgentWorkflow = {
   sharedContextSnapshot: string | null;
   steps: AgentWorkflowStep[];
   memoryEvents: WorkflowMemoryEvent[];
+  activityLog: ActivityEntry[];
+  currentActivity: string | null;
   finalResult: string | null;
   error: string | null;
 };
