@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  createWorkflowPlan,
   fetchAgentMessages,
   fetchAgents,
   fetchBrainState,
+  runWorkflow,
   saveBrainLogEntry,
   sendAgentMessage,
 } from "./brainApi";
 import type {
   AgentSummary,
+  AgentWorkflow,
   BrainLogEntryType,
   BrainMessage,
   BrainState,
@@ -38,6 +41,13 @@ export function AgentsHubPanel({
   const [logTitle, setLogTitle] = useState("");
   const [logBody, setLogBody] = useState("");
   const [logTags, setLogTags] = useState("");
+
+  const [wfTitle, setWfTitle] = useState("");
+  const [wfRequest, setWfRequest] = useState("");
+  const [wfActive, setWfActive] = useState<AgentWorkflow | null>(null);
+  const [wfPlanning, setWfPlanning] = useState(false);
+  const [wfRunning, setWfRunning] = useState(false);
+  const [wfError, setWfError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -190,6 +200,39 @@ export function AgentsHubPanel({
     }
   }
 
+  async function handleWorkflowPlan() {
+    const title = wfTitle.trim();
+    const userRequest = wfRequest.trim();
+    if (!title || !userRequest) {
+      setWfError("Укажи заголовок и описание задачи");
+      return;
+    }
+    setWfPlanning(true);
+    setWfError(null);
+    try {
+      const wf = await createWorkflowPlan({ title, userRequest });
+      setWfActive(wf);
+    } catch (e) {
+      setWfError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setWfPlanning(false);
+    }
+  }
+
+  async function handleWorkflowRun() {
+    if (!wfActive?.id) return;
+    setWfRunning(true);
+    setWfError(null);
+    try {
+      const wf = await runWorkflow(wfActive.id);
+      setWfActive(wf);
+    } catch (e) {
+      setWfError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setWfRunning(false);
+    }
+  }
+
   return (
     <div
       className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/80 p-4 backdrop-blur-xl"
@@ -227,6 +270,15 @@ export function AgentsHubPanel({
               </div>
             ) : null}
 
+            {wfError ? (
+              <div
+                className="mb-4 rounded-2xl border border-amber-400/20 bg-amber-500/10 p-3 text-sm text-amber-100"
+                role="status"
+              >
+                {wfError}
+              </div>
+            ) : null}
+
             <div className="mb-6 grid gap-3 sm:grid-cols-3">
               <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-3">
                 <p className="text-xs text-slate-400">Цель года</p>
@@ -252,6 +304,119 @@ export function AgentsHubPanel({
               </div>
             </div>
 
+            <div className="mb-6 rounded-2xl border border-cyan-500/20 bg-cyan-950/20 p-4">
+              <h3 className="text-base font-semibold text-white">
+                Запустить задачу через CEO
+              </h3>
+              <p className="mt-1 text-sm text-slate-400">
+                CEO формирует постановку, потом задача проходит по агентам с
+                проверкой и общей памятью.
+              </p>
+              <div className="mt-4 grid gap-3 md:grid-cols-2">
+                <label className="flex flex-col gap-1 text-xs text-slate-400">
+                  Заголовок
+                  <input
+                    type="text"
+                    value={wfTitle}
+                    onChange={(e) => setWfTitle(e.target.value)}
+                    className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-sm text-white"
+                    placeholder="Краткий заголовок задачи"
+                  />
+                </label>
+                <div className="hidden md:block" />
+                <label className="flex flex-col gap-1 text-xs text-slate-400 md:col-span-2">
+                  Запрос
+                  <textarea
+                    value={wfRequest}
+                    onChange={(e) => setWfRequest(e.target.value)}
+                    rows={4}
+                    className="w-full resize-none rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-sm text-white"
+                    placeholder="Опиши задачу для команды агентов…"
+                  />
+                </label>
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => void handleWorkflowPlan()}
+                  disabled={wfPlanning}
+                  className="rounded-full bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-cyan-400 disabled:opacity-50"
+                >
+                  {wfPlanning ? "Разбор…" : "Разобрать задачу"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleWorkflowRun()}
+                  disabled={
+                    wfRunning || !wfActive?.id || wfActive.status !== "planned"
+                  }
+                  className="rounded-full border border-white/20 px-4 py-2 text-sm font-medium text-white transition hover:bg-white/10 disabled:opacity-50"
+                >
+                  {wfRunning ? "Запуск…" : "Запустить цепочку агентов"}
+                </button>
+              </div>
+              {wfActive?.ceoPlan ? (
+                <div className="mt-4 rounded-xl border border-white/10 bg-black/20 p-3">
+                  <p className="text-xs font-medium text-cyan-300/90">
+                    План CEO
+                  </p>
+                  <pre className="mt-2 max-h-48 overflow-y-auto whitespace-pre-wrap text-xs text-slate-200">
+                    {wfActive.ceoPlan}
+                  </pre>
+                </div>
+              ) : null}
+              {wfActive && wfActive.steps.length > 0 ? (
+                <div className="mt-4 space-y-2">
+                  <p className="text-xs font-medium text-slate-400">Шаги</p>
+                  <ul className="space-y-2">
+                    {wfActive.steps.map((step) => (
+                      <li
+                        key={step.id}
+                        className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs"
+                      >
+                        <p className="font-medium text-white">
+                          {step.agentKey}
+                          {step.reviewerKey ? (
+                            <span className="text-slate-500">
+                              {" "}
+                              → rev: {step.reviewerKey}
+                            </span>
+                          ) : null}
+                        </p>
+                        <p className="text-slate-400">{step.title}</p>
+                        <p className="mt-1 text-slate-500">
+                          status: {step.status} · review: {step.reviewStatus}
+                        </p>
+                        {step.output ? (
+                          <pre className="mt-2 max-h-32 overflow-y-auto whitespace-pre-wrap text-[11px] text-slate-300">
+                            {step.output}
+                          </pre>
+                        ) : null}
+                        {step.reviewOutput ? (
+                          <pre className="mt-1 max-h-24 overflow-y-auto whitespace-pre-wrap text-[11px] text-amber-200/80">
+                            {step.reviewOutput}
+                          </pre>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+              {wfActive?.finalResult ? (
+                <div className="mt-4 rounded-xl border border-emerald-500/25 bg-emerald-950/30 p-3">
+                  <p className="text-xs font-semibold text-emerald-300">
+                    Финальный результат
+                  </p>
+                  <pre className="mt-2 max-h-40 overflow-y-auto whitespace-pre-wrap text-sm text-white">
+                    {wfActive.finalResult}
+                  </pre>
+                </div>
+              ) : null}
+              {wfActive?.status === "failed" && wfActive.error ? (
+                <p className="mt-2 text-sm text-red-300">{wfActive.error}</p>
+              ) : null}
+            </div>
+
             <div className="mb-6">
               <h3 className="text-sm font-semibold text-white">Задачи дня</h3>
               {tasks.length === 0 ? (
@@ -274,6 +439,10 @@ export function AgentsHubPanel({
                 </ul>
               )}
             </div>
+
+            <h3 className="mb-2 text-sm font-semibold text-white">
+              Ручной чат с агентом
+            </h3>
 
             <div className="grid gap-4 lg:grid-cols-[minmax(200px,260px)_1fr]">
               <aside>

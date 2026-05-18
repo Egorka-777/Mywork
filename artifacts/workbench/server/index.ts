@@ -20,6 +20,12 @@ import {
   type BrainLogEntryType,
 } from "./brain";
 import {
+  createWorkflowPlan,
+  listWorkflows,
+  readWorkflow,
+  runWorkflow,
+} from "./agentWorkflow";
+import {
   ExtractError,
   RewriteError,
   SOURCE_REWRITER_ALLOWED_EXT,
@@ -56,6 +62,11 @@ const VISION_MODEL =
 const INSTAGRAM_ACCOUNT_ID = process.env.INSTAGRAM_ACCOUNT_ID || "";
 const INSTAGRAM_ACCESS_TOKEN = process.env.INSTAGRAM_ACCESS_TOKEN || "";
 const GROQ_API_KEY = process.env.GROQ_API_KEY || "";
+
+const WORKFLOW_CEO_MODEL =
+  process.env.OPENROUTER_MODEL_CEO?.trim() ||
+  process.env.OPENROUTER_AGENTS_MODEL_CEO?.trim() ||
+  TEXT_MODEL;
 
 const openrouter = new OpenAI({
   baseURL: "https://openrouter.ai/api/v1",
@@ -151,6 +162,24 @@ function extractOpenRouterText(completion: {
 
   return "";
 }
+
+const workflowLlm = {
+  complete: async (args: {
+    model: string;
+    system: string;
+    user: string;
+  }): Promise<string> => {
+    const completion = await openrouter.chat.completions.create({
+      model: args.model,
+      max_tokens: 4096,
+      messages: [
+        { role: "system", content: args.system },
+        { role: "user", content: args.user },
+      ],
+    });
+    return extractOpenRouterText(completion);
+  },
+};
 
 function brainErrorStatus(message: string): number {
   if (message.startsWith("Unknown agent key:")) return 404;
@@ -1199,6 +1228,83 @@ app.post("/wb/agents/:key/messages", async (req, res) => {
       return res.status(500).json({ error: message });
     }
     return res.status(brainErrorStatus(message)).json({ error: message });
+  }
+});
+
+app.get("/wb/workflows", async (req, res) => {
+  try {
+    const limit = getOptionalPositiveInt(req.query.limit, 20, 50);
+    const workflows = await listWorkflows(limit);
+    return res.json({ workflows });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    return res.status(500).json({ error: message });
+  }
+});
+
+app.get("/wb/workflows/:id", async (req, res) => {
+  try {
+    const workflow = await readWorkflow(req.params.id);
+    return res.json({ workflow });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    const status = message === "Workflow not found" ? 404 : 500;
+    return res.status(status).json({ error: message });
+  }
+});
+
+app.post("/wb/workflows/plan", async (req, res) => {
+  if (!OPENROUTER_KEY) {
+    return res
+      .status(503)
+      .json({ error: "OPENROUTER_API_KEY not configured" });
+  }
+  try {
+    const title =
+      typeof req.body?.title === "string" ? req.body.title.trim() : "";
+    const userRequest =
+      typeof req.body?.userRequest === "string"
+        ? req.body.userRequest.trim()
+        : "";
+    if (!title || !userRequest) {
+      return res
+        .status(400)
+        .json({ error: "title and userRequest are required" });
+    }
+    const workflow = await createWorkflowPlan({
+      title,
+      userRequest,
+      llm: workflowLlm,
+      ceoModel: WORKFLOW_CEO_MODEL,
+    });
+    return res.json({ workflow });
+  } catch (e) {
+    const detail = e instanceof Error ? e.message : String(e);
+    return res.status(502).json({ error: "workflow plan failed", detail });
+  }
+});
+
+app.post("/wb/workflows/:id/run", async (req, res) => {
+  if (!OPENROUTER_KEY) {
+    return res
+      .status(503)
+      .json({ error: "OPENROUTER_API_KEY not configured" });
+  }
+  try {
+    const workflow = await runWorkflow({
+      workflowId: req.params.id,
+      llm: workflowLlm,
+    });
+    return res.json({ workflow });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    if (message.startsWith("Missing required env:")) {
+      return res.status(500).json({ error: message });
+    }
+    return res.status(502).json({
+      error: "workflow run failed",
+      detail: message,
+    });
   }
 });
 

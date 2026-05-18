@@ -1,6 +1,7 @@
 import type {
   AgentMessagesResponse,
   AgentSummary,
+  AgentWorkflow,
   AgentsResponse,
   BrainApiErrorPayload,
   BrainLogEntry,
@@ -9,7 +10,10 @@ import type {
   BrainMessage,
   BrainState,
   BrainStatePatch,
+  CreateWorkflowPlanInput,
   SendAgentMessageResponse,
+  WorkflowResponse,
+  WorkflowsResponse,
 } from "./brainTypes";
 
 const JSON_HEADERS = {
@@ -154,4 +158,39 @@ export async function sendAgentMessage(
   );
 
   return response.message;
+}
+
+export async function createWorkflowPlan(
+  input: CreateWorkflowPlanInput
+): Promise<AgentWorkflow> {
+  const response = await requestJson<WorkflowResponse>("/wb/workflows/plan", {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: JSON.stringify(input),
+  });
+  return response.workflow;
+}
+
+export async function runWorkflow(workflowId: string): Promise<AgentWorkflow> {
+  const safeId = encodeURIComponent(assertNonEmptyString(workflowId, "workflowId"));
+  const response = await requestJson<WorkflowResponse>(
+    `/wb/workflows/${safeId}/run`,
+    { method: "POST" }
+  );
+  return response.workflow;
+}
+
+export async function fetchWorkflow(workflowId: string): Promise<AgentWorkflow> {
+  const safeId = encodeURIComponent(assertNonEmptyString(workflowId, "workflowId"));
+  const response = await requestJson<WorkflowResponse>(
+    `/wb/workflows/${safeId}`
+  );
+  return response.workflow;
+}
+
+export async function fetchWorkflows(limit = 20): Promise<AgentWorkflow[]> {
+  const response = await requestJson<WorkflowsResponse>(
+    `/wb/workflows${buildQuery({ limit })}`
+  );
+  return response.workflows;
 }

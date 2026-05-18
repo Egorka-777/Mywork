@@ -96,3 +96,83 @@ export type BrainApiErrorPayload = {
   error?: string;
   detail?: string;
 };
+
+export type WorkflowStatus =
+  | "draft"
+  | "planned"
+  | "running"
+  | "reviewing"
+  | "revision_required"
+  | "completed"
+  | "failed";
+
+export type WorkflowStepStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "reviewing"
+  | "revision_required"
+  | "failed";
+
+export type ReviewStatus = "not_started" | "passed" | "failed";
+
+export type WorkflowAgentKey =
+  | "ceo"
+  | "operations"
+  | "funnel"
+  | "content_strategy"
+  | "rewriter"
+  | "tech_architect";
+
+export type WorkflowMemoryEvent = {
+  id: string;
+  ts: string;
+  agentKey: WorkflowAgentKey;
+  type: "plan" | "output" | "review" | "revision" | "final" | "note";
+  title: string;
+  body: string;
+};
+
+export type AgentWorkflowStep = {
+  id: string;
+  agentKey: WorkflowAgentKey;
+  reviewerKey: WorkflowAgentKey | null;
+  title: string;
+  instruction: string;
+  status: WorkflowStepStatus;
+  output: string | null;
+  reviewStatus: ReviewStatus;
+  reviewOutput: string | null;
+  revisionCount: number;
+  error: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+};
+
+export type AgentWorkflow = {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+  status: WorkflowStatus;
+  title: string;
+  userRequest: string;
+  ceoPlan: string | null;
+  sharedContextSnapshot: string | null;
+  steps: AgentWorkflowStep[];
+  memoryEvents: WorkflowMemoryEvent[];
+  finalResult: string | null;
+  error: string | null;
+};
+
+export type CreateWorkflowPlanInput = {
+  title: string;
+  userRequest: string;
+};
+
+export type WorkflowResponse = {
+  workflow: AgentWorkflow;
+};
+
+export type WorkflowsResponse = {
+  workflows: AgentWorkflow[];
+};

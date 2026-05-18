@@ -54,4 +54,5 @@ Thumbs.db
 # Workbench Agents Hub local brain runtime files
 artifacts/workbench/data/brain/conversations/*.jsonl
 artifacts/workbench/data/brain/log.jsonl
+artifacts/workbench/data/brain/workflows/*.json
 artifacts/workbench/.env
