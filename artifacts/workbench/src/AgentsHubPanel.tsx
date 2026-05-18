@@ -4,11 +4,13 @@ import {
   fetchAgentMessages,
   fetchAgents,
   fetchBrainState,
-  runWorkflow,
+  fetchWorkflow,
   saveBrainLogEntry,
   sendAgentMessage,
+  startWorkflow,
 } from "./brainApi";
 import type {
+  ActivityEntry,
   AgentSummary,
   AgentWorkflow,
   BrainLogEntryType,
@@ -48,6 +50,45 @@ export function AgentsHubPanel({
   const [wfPlanning, setWfPlanning] = useState(false);
   const [wfRunning, setWfRunning] = useState(false);
   const [wfError, setWfError] = useState<string | null>(null);
+  const [wfPollingId, setWfPollingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!wfPollingId) return;
+
+    let cancelled = false;
+    let timeoutId: number | undefined;
+
+    async function poll() {
+      try {
+        const latest = await fetchWorkflow(wfPollingId!);
+        if (cancelled) return;
+        setWfActive(latest);
+        const stillRunning =
+          latest.status === "running" ||
+          latest.status === "reviewing" ||
+          latest.status === "revision_required" ||
+          latest.status === "planned";
+        if (stillRunning) {
+          timeoutId = window.setTimeout(() => void poll(), 1200);
+          return;
+        }
+        setWfRunning(false);
+        setWfPollingId(null);
+      } catch (e) {
+        if (cancelled) return;
+        setWfRunning(false);
+        setWfPollingId(null);
+        setWfError(e instanceof Error ? e.message : String(e));
+      }
+    }
+
+    void poll();
+
+    return () => {
+      cancelled = true;
+      if (timeoutId !== undefined) window.clearTimeout(timeoutId);
+    };
+  }, [wfPollingId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -224,12 +265,14 @@ export function AgentsHubPanel({
     setWfRunning(true);
     setWfError(null);
     try {
-      const wf = await runWorkflow(wfActive.id);
-      setWfActive(wf);
+      await startWorkflow(wfActive.id);
+      const latest = await fetchWorkflow(wfActive.id);
+      setWfActive(latest);
+      setWfPollingId(wfActive.id);
     } catch (e) {
-      setWfError(e instanceof Error ? e.message : String(e));
-    } finally {
       setWfRunning(false);
+      setWfPollingId(null);
+      setWfError(e instanceof Error ? e.message : String(e));
     }
   }
 
@@ -352,9 +395,30 @@ export function AgentsHubPanel({
                   }
                   className="rounded-full border border-white/20 px-4 py-2 text-sm font-medium text-white transition hover:bg-white/10 disabled:opacity-50"
                 >
-                  {wfRunning ? "Запуск…" : "Запустить цепочку агентов"}
+                  {wfRunning ? "Выполняется…" : "Запустить цепочку агентов"}
                 </button>
               </div>
+
+              {wfActive?.currentActivity ? (
+                <div className="mt-4 rounded-xl border border-cyan-400/20 bg-cyan-500/10 p-3">
+                  <p className="text-xs font-medium text-cyan-300">Сейчас</p>
+                  <p className="mt-1 text-sm text-white">{wfActive.currentActivity}</p>
+                </div>
+              ) : null}
+
+              {(wfActive?.activityLog?.length ?? 0) > 0 ? (
+                <div className="mt-4 rounded-xl border border-white/10 bg-black/20 p-3">
+                  <p className="text-xs font-medium text-slate-300">
+                    Живой журнал{wfRunning ? <span className="ml-1.5 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-cyan-400 align-middle" /> : null}
+                  </p>
+                  <div className="mt-2 max-h-72 space-y-1.5 overflow-y-auto pr-1">
+                    {(wfActive?.activityLog ?? []).slice(-30).map((entry: ActivityEntry) => (
+                      <ActivityRow key={entry.id} entry={entry} />
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
               {wfActive?.ceoPlan ? (
                 <div className="mt-4 rounded-xl border border-white/10 bg-black/20 p-3">
                   <p className="text-xs font-medium text-cyan-300/90">
@@ -365,47 +429,34 @@ export function AgentsHubPanel({
                   </pre>
                 </div>
               ) : null}
+
               {wfActive && wfActive.steps.length > 0 ? (
                 <div className="mt-4 space-y-2">
                   <p className="text-xs font-medium text-slate-400">Шаги</p>
-                  <ul className="space-y-2">
-                    {wfActive.steps.map((step) => (
-                      <li
-                        key={step.id}
-                        className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs"
-                      >
-                        <p className="font-medium text-white">
-                          {step.agentKey}
-                          {step.reviewerKey ? (
-                            <span className="text-slate-500">
-                              {" "}
-                              → rev: {step.reviewerKey}
-                            </span>
-                          ) : null}
-                        </p>
-                        <p className="text-slate-400">{step.title}</p>
-                        <p className="mt-1 text-slate-500">
-                          status: {step.status} · review: {step.reviewStatus}
-                        </p>
-                        {step.output ? (
-                          <pre className="mt-2 max-h-32 overflow-y-auto whitespace-pre-wrap text-[11px] text-slate-300">
-                            {step.output}
-                          </pre>
-                        ) : null}
-                        {step.reviewOutput ? (
-                          <pre className="mt-1 max-h-24 overflow-y-auto whitespace-pre-wrap text-[11px] text-amber-200/80">
-                            {step.reviewOutput}
-                          </pre>
-                        ) : null}
-                      </li>
-                    ))}
+                  <ul className="space-y-1.5">
+                    {wfActive.steps.map((step, idx) => {
+                      const isActive = step.status === "running" || step.status === "reviewing";
+                      const isDone = step.status === "completed";
+                      const isFailed = step.status === "failed" || step.status === "revision_required";
+                      return (
+                        <StepRow
+                          key={step.id}
+                          step={step}
+                          idx={idx}
+                          isActive={isActive}
+                          isDone={isDone}
+                          isFailed={isFailed}
+                        />
+                      );
+                    })}
                   </ul>
                 </div>
               ) : null}
+
               {wfActive?.finalResult ? (
                 <div className="mt-4 rounded-xl border border-emerald-500/25 bg-emerald-950/30 p-3">
                   <p className="text-xs font-semibold text-emerald-300">
-                    Финальный результат
+                    ✅ Финальный результат
                   </p>
                   <pre className="mt-2 max-h-40 overflow-y-auto whitespace-pre-wrap text-sm text-white">
                     {wfActive.finalResult}
@@ -413,7 +464,10 @@ export function AgentsHubPanel({
                 </div>
               ) : null}
               {wfActive?.status === "failed" && wfActive.error ? (
-                <p className="mt-2 text-sm text-red-300">{wfActive.error}</p>
+                <div className="mt-2 rounded-xl border border-red-400/20 bg-red-950/20 p-3">
+                  <p className="text-xs font-semibold text-red-300">Ошибка</p>
+                  <p className="mt-1 text-sm text-red-200">{wfActive.error}</p>
+                </div>
               ) : null}
             </div>
 
@@ -642,5 +696,160 @@ export function AgentsHubPanel({
         </section>
       </div>
     </div>
+  );
+}
+
+const AGENT_COLORS: Record<string, string> = {
+  ceo: "text-cyan-300",
+  operations: "text-violet-300",
+  funnel: "text-amber-300",
+  content_strategy: "text-emerald-300",
+  rewriter: "text-pink-300",
+  tech_architect: "text-sky-300",
+  system: "text-slate-400",
+};
+
+const AGENT_LABELS: Record<string, string> = {
+  ceo: "CEO",
+  operations: "Operations",
+  funnel: "Funnel",
+  content_strategy: "Контент",
+  rewriter: "Rewriter",
+  tech_architect: "Tech Arch",
+  system: "Система",
+};
+
+const PHASE_ICONS: Record<string, string> = {
+  system: "▶",
+  reading: "📖",
+  thinking: "💭",
+  output: "💬",
+  sending: "→",
+  review: "🔍",
+  revision: "🔄",
+  done: "✓",
+  error: "✗",
+};
+
+function ActivityRow({ entry }: { entry: ActivityEntry }) {
+  const [expanded, setExpanded] = useState(false);
+  const isSystem = entry.agentKey === "system";
+  const isOutput = entry.phase === "output" || entry.phase === "review";
+  const color = AGENT_COLORS[entry.agentKey] ?? "text-slate-400";
+  const label = AGENT_LABELS[entry.agentKey] ?? entry.agentKey;
+  const icon = PHASE_ICONS[entry.phase] ?? "·";
+  const isLong = entry.text.length > 220;
+
+  if (isSystem) {
+    return (
+      <div className="flex items-center gap-1.5 py-0.5">
+        <span className="text-[10px] text-slate-600">{icon}</span>
+        <span className="text-[11px] text-slate-500">{entry.text}</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-lg border border-white/[0.07] bg-white/[0.03] px-2.5 py-2">
+      <div className="flex items-center gap-1.5">
+        <span className="text-xs leading-none">{icon}</span>
+        <span className={`text-[11px] font-semibold ${color}`}>{label}</span>
+      </div>
+      {entry.text ? (
+        <div className="mt-1">
+          <p
+            className={`whitespace-pre-wrap text-[11px] leading-relaxed ${
+              isOutput ? "text-slate-200" : "text-slate-400 italic"
+            } ${!expanded && isLong ? "line-clamp-4" : ""}`}
+          >
+            {entry.text}
+          </p>
+          {isLong ? (
+            <button
+              type="button"
+              onClick={() => setExpanded((v) => !v)}
+              className="mt-0.5 text-[10px] text-cyan-400 hover:underline"
+            >
+              {expanded ? "Свернуть ▲" : "Развернуть ▼"}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+type StepRowProps = {
+  step: {
+    id: string;
+    agentKey: string;
+    reviewerKey: string | null;
+    title: string;
+    status: string;
+    reviewStatus: string;
+    output: string | null;
+    reviewOutput: string | null;
+  };
+  idx: number;
+  isActive: boolean;
+  isDone: boolean;
+  isFailed: boolean;
+};
+
+function StepRow({ step, idx, isActive, isDone, isFailed }: StepRowProps) {
+  const [expanded, setExpanded] = useState(false);
+  const color = AGENT_COLORS[step.agentKey] ?? "text-slate-300";
+  const label = AGENT_LABELS[step.agentKey] ?? step.agentKey;
+  const hasOutput = !!(step.output || step.reviewOutput);
+
+  return (
+    <li className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs">
+      <div className="flex items-center gap-2">
+        <span
+          className={`h-2 w-2 shrink-0 rounded-full ${
+            isActive
+              ? "animate-pulse bg-cyan-400"
+              : isDone
+              ? "bg-emerald-400"
+              : isFailed
+              ? "bg-red-400"
+              : "bg-slate-600"
+          }`}
+        />
+        <span className="text-slate-500">{idx + 1}.</span>
+        <span className={`font-semibold ${color}`}>{label}</span>
+        <span className="truncate text-slate-300">{step.title}</span>
+        {step.reviewerKey ? (
+          <span className="ml-auto shrink-0 text-[10px] text-slate-600">
+            rev: {AGENT_LABELS[step.reviewerKey] ?? step.reviewerKey}
+          </span>
+        ) : null}
+      </div>
+      {hasOutput ? (
+        <div className="mt-1.5">
+          <button
+            type="button"
+            onClick={() => setExpanded((v) => !v)}
+            className="text-[10px] text-cyan-400/70 hover:underline"
+          >
+            {expanded ? "Скрыть ▲" : "Показать вывод ▼"}
+          </button>
+          {expanded ? (
+            <div className="mt-1 space-y-1">
+              {step.output ? (
+                <pre className="max-h-40 overflow-y-auto whitespace-pre-wrap text-[11px] text-slate-200">
+                  {step.output}
+                </pre>
+              ) : null}
+              {step.reviewOutput ? (
+                <pre className="max-h-28 overflow-y-auto whitespace-pre-wrap text-[11px] text-amber-200/80">
+                  {step.reviewOutput}
+                </pre>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </li>
   );
 }
