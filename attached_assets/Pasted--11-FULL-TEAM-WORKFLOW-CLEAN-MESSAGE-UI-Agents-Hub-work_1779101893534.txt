@@ -1,0 +1,534 @@
+ПРОХОД 11 — FULL TEAM WORKFLOW + CLEAN MESSAGE UI
+
+ЦЕЛЬ:
+Исправить Agents Hub workflow так, чтобы каждая задача проходила всех агентов команды, а UI показывал нормальные сообщения вместо сырого Markdown/protocol-текста.
+
+СЕЙЧАС НЕ ТАК:
+1. Workflow строится как 4 шага:
+   CEO → Operations → primaryAgent → CEO final.
+2. primaryAgent выбирается через selectPrimaryAgent(userRequest).
+3. Если userRequest общий, primaryAgent становится operations.
+4. В итоге пользователь видит только CEO и Operations.
+5. Это не соответствует требованию: каждая задача должна проходить всех агентов.
+6. UI выводит output/reviewOutput/finalResult как сырой текст через pre, поэтому видно **, ##, REVIEW_STATUS, REQUIRED_FIX, HANDOFF_SUMMARY.
+
+ГЛАВНОЕ ПРАВИЛО:
+Не делать новый workflow с нуля.
+Не переписывать весь AgentsHubPanel.
+Не трогать App.tsx.
+Не трогать старые плитки.
+Не трогать brainApi/brainTypes, если новых типов не требуется.
+Сделать точечный root-fix в owner-файлах.
+
+РАЗРЕШЕНО МЕНЯТЬ:
+1. artifacts/workbench/server/agentWorkflow.ts
+2. artifacts/workbench/src/AgentsHubPanel.tsx
+
+ЗАПРЕЩЕНО МЕНЯТЬ:
+1. artifacts/workbench/src/App.tsx
+2. artifacts/workbench/src/AgentsHubCard.tsx
+3. artifacts/workbench/src/index.css
+4. artifacts/workbench/src/brainApi.ts
+5. artifacts/workbench/src/brainTypes.ts
+6. artifacts/workbench/server/index.ts
+7. artifacts/workbench/server/brain.ts
+8. artifacts/workbench/package.json
+9. pnpm-lock.yaml
+10. tracker/freedz/carousel/sourceRewriter
+11. upload/proxy/payload logic
+12. Creovix/api-server
+
+ПРЕДПРОВЕРКА:
+Выполнить:
+
+git status --short
+
+grep -n "selectPrimaryAgent\|selectReviewerForStep\|draft.steps = \[" artifacts/workbench/server/agentWorkflow.ts
+
+grep -n "step.output\|step.reviewOutput\|wfActive.ceoPlan\|wfActive.finalResult\|<pre" artifacts/workbench/src/AgentsHubPanel.tsx
+
+cd artifacts/workbench
+pnpm run typecheck
+
+Если typecheck падает до правки — остановиться и показать ошибку.
+
+────────────────────────────────────────
+ЧАСТЬ 1 — ИСПРАВИТЬ WORKFLOW ЦЕПОЧКУ
+────────────────────────────────────────
+
+ФАЙЛ:
+artifacts/workbench/server/agentWorkflow.ts
+
+НАЙТИ:
+В createWorkflowPlan() блок:
+
+const primary = selectPrimaryAgent(userRequest);
+const reviewerPrimary = selectReviewerForStep(primary);
+
+draft.steps = [
+  newStep("ceo", "operations", ...),
+  newStep("operations", "ceo", ...),
+  newStep(primary, reviewerPrimary, ...),
+  newStep("ceo", null, ...)
+];
+
+ПРОБЛЕМА:
+Этот блок запускает только одного профильного агента. Остальные агенты не работают.
+
+ПРАВКА:
+Заменить формирование draft.steps на фиксированную full-team цепочку.
+
+УДАЛИТЬ:
+- const primary = selectPrimaryAgent(userRequest);
+- const reviewerPrimary = selectReviewerForStep(primary);
+- текущий draft.steps из 4 шагов
+
+ВСТАВИТЬ ВМЕСТО ЭТОГО:
+
+draft.steps = [
+  newStep(
+    "ceo",
+    "operations",
+    "Уточнить цель и критерий готово",
+    "Сформулируй цель, критерии успеха, ограничения и границы задачи. Не выполняй работу других агентов. Дай рамку для всей команды."
+  ),
+  newStep(
+    "operations",
+    "ceo",
+    "Разбить задачу на порядок выполнения",
+    "Преврати задачу в короткий порядок выполнения: сегодня / порядок / что не делать / отчёт. Не уходи в стратегию, оффер, контент или код. Твоя роль — операционная структура."
+  ),
+  newStep(
+    "funnel",
+    "ceo",
+    "Проверить деньги, оффер и путь к продаже",
+    "Посмотри на задачу через продажи: оффер, лид-магнит, доверие, CTA, путь от внимания до заявки/продажи. Если задача не про продажи напрямую — всё равно дай коммерческий угол и риск по деньгам."
+  ),
+  newStep(
+    "content_strategy",
+    "rewriter",
+    "Сформировать контентную подачу",
+    "Посмотри на задачу через контент: как это объяснить аудитории, какие форматы подойдут, какой хук, какая структура подачи, где это использовать. Не пиши финальный polished-текст — дай контентную стратегию."
+  ),
+  newStep(
+    "rewriter",
+    "content_strategy",
+    "Привести формулировки к стилю Егора",
+    "Перепиши ключевые формулировки живым стилем Егора: проще, сильнее, без канцелярита и GPT-тона. Не выдумывай факты. Сохрани смысл предыдущих агентов."
+  ),
+  newStep(
+    "tech_architect",
+    "ceo",
+    "Проверить техническую реализацию и риски",
+    "Посмотри на задачу как технический архитектор: что нужно реализовать, где owner-слой, какие файлы/механизмы могут понадобиться, какие риски, что нельзя трогать. Если задача не техническая — дай минимальный технический/организационный способ реализации без лишней архитектуры."
+  ),
+  newStep(
+    "ceo",
+    null,
+    "Собрать финальный результат для Егора",
+    "Собери финальный ответ на основе всех предыдущих агентов: решение, порядок действий, что принято, что спорно, что записать в brain log, next action. Не скрывай конфликты между агентами."
+  ),
+];
+
+ВАЖНО:
+selectPrimaryAgent можно оставить в файле, если он где-то ещё используется или может пригодиться позже, но в createWorkflowPlan() он больше не должен определять основной путь.
+
+ПРОВЕРКА:
+grep -n "draft.steps = \[" artifacts/workbench/server/agentWorkflow.ts
+grep -n "\"funnel\"\|\"content_strategy\"\|\"rewriter\"\|\"tech_architect\"" artifacts/workbench/server/agentWorkflow.ts
+
+ОЖИДАНИЕ:
+В draft.steps явно есть:
+ceo
+operations
+funnel
+content_strategy
+rewriter
+tech_architect
+ceo final
+
+────────────────────────────────────────
+ЧАСТЬ 2 — УСИЛИТЬ WORKFLOW ПРОТОКОЛ
+────────────────────────────────────────
+
+ФАЙЛ:
+artifacts/workbench/server/agentWorkflow.ts
+
+НАЙТИ:
+const WORKFLOW_PROTOCOL = `...`
+
+ДОБАВИТЬ ВНУТРЬ ПРОТОКОЛА:
+
+ФОРМАТ ОТВЕТА:
+Не используй Markdown-заголовки вида ##.
+Не используй жирный Markdown через **.
+Пиши обычным текстом с короткими секциями.
+Каждый ответ должен иметь:
+
+КРАТКО:
+<1–3 предложения>
+
+СДЕЛАНО:
+- ...
+
+ПЕРЕДАТЬ ДАЛЬШЕ:
+<что следующему агенту важно знать>
+
+ПРОВЕРИТЬ:
+- ...
+
+NEXT ACTION:
+<одно конкретное действие>
+
+HANDOFF_SUMMARY:
+- что сделано
+- что следующему агенту нужно знать
+- что проверить
+
+ВАЖНО:
+Не убирать HANDOFF_SUMMARY, потому что workflow использует его как дисциплину передачи.
+Но запретить Markdown ** и ##.
+
+────────────────────────────────────────
+ЧАСТЬ 3 — НОРМАЛЬНО ПОКАЗЫВАТЬ СООБЩЕНИЯ
+────────────────────────────────────────
+
+ФАЙЛ:
+artifacts/workbench/src/AgentsHubPanel.tsx
+
+НАЙТИ:
+Места, где выводятся:
+- wfActive.ceoPlan
+- step.output
+- step.reviewOutput
+- wfActive.finalResult
+
+Сейчас они выводятся через <pre>.
+
+ПРОБЛЕМА:
+UI показывает сырой Markdown/protocol-текст.
+
+ПРАВКА:
+Добавить внутри AgentsHubPanel.tsx helper-компоненты, без новых файлов и без новых зависимостей.
+
+ДОБАВИТЬ перед export function AgentsHubPanel:
+
+function cleanAgentText(text: string): string {
+  return text
+    .replace(/^#{1,6}\s*/gm, "")
+    .replace(/\*\*(.*?)\*\*/g, "$1")
+    .replace(/\[BRAIN LOG\]/g, "BRAIN LOG:")
+    .replace(/────/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function splitAgentText(text: string): string[] {
+  return cleanAgentText(text)
+    .split(/\n{2,}/)
+    .map((block) => block.trim())
+    .filter(Boolean);
+}
+
+function AgentMessageBlock({ text }: { text: string }) {
+  const blocks = splitAgentText(text);
+
+  return (
+    <div className="space-y-2 text-sm text-slate-100">
+      {blocks.map((block, index) => {
+        const isList = block
+          .split("\n")
+          .every((line) => /^[-✓✅•]|\d+\./.test(line.trim()));
+
+        if (isList) {
+          return (
+            <ul key={index} className="list-disc space-y-1 pl-5 text-slate-200">
+              {block.split("\n").map((line, lineIndex) => (
+                <li key={lineIndex}>
+                  {line.replace(/^[-✓✅•]\s*/, "").replace(/^\d+\.\s*/, "")}
+                </li>
+              ))}
+            </ul>
+          );
+        }
+
+        return (
+          <p key={index} className="whitespace-pre-wrap leading-relaxed">
+            {block}
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
+function parseReviewText(text: string): {
+  status: "passed" | "failed" | "unknown";
+  notes: string;
+  requiredFix: string;
+} {
+  const cleaned = cleanAgentText(text);
+  const statusMatch = cleaned.match(/REVIEW_STATUS:\s*(passed|failed)/i);
+  const status = statusMatch
+    ? (statusMatch[1].toLowerCase() as "passed" | "failed")
+    : "unknown";
+
+  const notesMatch = cleaned.match(/REVIEW_NOTES:\s*([\s\S]*?)(REQUIRED_FIX:|$)/i);
+  const fixMatch = cleaned.match(/REQUIRED_FIX:\s*([\s\S]*)/i);
+
+  return {
+    status,
+    notes: notesMatch?.[1]?.trim() || cleaned,
+    requiredFix: fixMatch?.[1]?.trim() || "none",
+  };
+}
+
+function ReviewMessageBlock({ text }: { text: string }) {
+  const review = parseReviewText(text);
+  const passed = review.status === "passed";
+  const failed = review.status === "failed";
+
+  return (
+    <div
+      className={`rounded-xl border p-3 text-sm ${
+        passed
+          ? "border-emerald-400/20 bg-emerald-500/10 text-emerald-50"
+          : failed
+            ? "border-red-400/20 bg-red-500/10 text-red-50"
+            : "border-white/10 bg-white/[0.04] text-slate-100"
+      }`}
+    >
+      <p className="font-semibold">
+        {passed ? "Проверка пройдена" : failed ? "Нужна доработка" : "Проверка"}
+      </p>
+
+      <div className="mt-2">
+        <p className="text-xs opacity-70">Комментарий</p>
+        <AgentMessageBlock text={review.notes} />
+      </div>
+
+      {review.requiredFix && review.requiredFix.toLowerCase() !== "none" ? (
+        <div className="mt-3">
+          <p className="text-xs opacity-70">Что исправить</p>
+          <AgentMessageBlock text={review.requiredFix} />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+НЕ создавать новый CSS.
+НЕ ставить markdown-библиотеку.
+НЕ использовать dangerouslySetInnerHTML.
+
+────────────────────────────────────────
+ЧАСТЬ 4 — ЗАМЕНИТЬ RAW PRE НА КОМПОНЕНТЫ
+────────────────────────────────────────
+
+ФАЙЛ:
+artifacts/workbench/src/AgentsHubPanel.tsx
+
+1. Найти блок "План CEO":
+
+Сейчас:
+<pre ...>{wfActive.ceoPlan}</pre>
+
+Заменить внутренность на:
+
+<div className="mt-2 max-h-48 overflow-y-auto pr-2">
+  <AgentMessageBlock text={wfActive.ceoPlan} />
+</div>
+
+2. Найти step.output:
+
+Сейчас:
+<pre ...>{step.output}</pre>
+
+Заменить на:
+
+<div className="mt-2 max-h-48 overflow-y-auto rounded-lg bg-black/20 p-3">
+  <AgentMessageBlock text={step.output} />
+</div>
+
+3. Найти step.reviewOutput:
+
+Сейчас:
+<pre ...>{step.reviewOutput}</pre>
+
+Заменить на:
+
+<div className="mt-2">
+  <ReviewMessageBlock text={step.reviewOutput} />
+</div>
+
+4. Найти wfActive.finalResult:
+
+Сейчас:
+<pre ...>{wfActive.finalResult}</pre>
+
+Заменить на:
+
+<div className="mt-2 max-h-72 overflow-y-auto pr-2">
+  <AgentMessageBlock text={wfActive.finalResult} />
+</div>
+
+5. В activityLog, если там сейчас entry.text выводится сырым, заменить:
+
+<p className="...">{entry.text}</p>
+
+на:
+
+<div className="mt-1">
+  {entry.phase === "review" ? (
+    <ReviewMessageBlock text={entry.text} />
+  ) : (
+    <AgentMessageBlock text={entry.text} />
+  )}
+</div>
+
+Если activityLog UI уже сделан иначе — заменить только текстовую часть, не переписывать весь блок.
+
+────────────────────────────────────────
+ЧАСТЬ 5 — ПРОВЕРКА
+────────────────────────────────────────
+
+GREP:
+
+grep -n "draft.steps = \[" artifacts/workbench/server/agentWorkflow.ts
+
+grep -n "\"funnel\"\|\"content_strategy\"\|\"rewriter\"\|\"tech_architect\"" artifacts/workbench/server/agentWorkflow.ts
+
+grep -n "cleanAgentText\|AgentMessageBlock\|ReviewMessageBlock\|parseReviewText" artifacts/workbench/src/AgentsHubPanel.tsx
+
+grep -n "<pre" artifacts/workbench/src/AgentsHubPanel.tsx || true
+
+ОЖИДАНИЕ:
+- draft.steps содержит full-team цепочку
+- helper-компоненты есть
+- <pre> больше не используется для workflow output/review/final
+- если <pre> остался где-то вне workflow — объяснить где и почему
+
+TYPECHECK / BUILD:
+
+cd artifacts/workbench
+pnpm run typecheck
+pnpm run build
+
+SMOKE TEST:
+
+pnpm run dev
+
+Открыть:
+http://127.0.0.1:5180
+
+Создать тест:
+
+Заголовок:
+Проверка всех агентов
+
+Запрос:
+Проверь работу команды агентов на задаче: создать мини-воронку для продажи консультации по нейросетям за 5000 руб.
+
+Ожидание в UI:
+1. После plan появились шаги:
+   - CEO
+   - Operations
+   - Funnel
+   - Content Strategy
+   - Rewriter
+   - Tech Architect
+   - CEO final
+2. После start каждый агент проходит свой шаг.
+3. В live log видны передачи между агентами.
+4. Review показывается не сырой простынёй, а карточкой:
+   - Проверка пройдена / Нужна доработка
+   - Комментарий
+   - Что исправить
+5. Output показывается как обычное сообщение без ## и **.
+6. Финальный результат читаемый.
+7. Ручной чат с агентом ниже работает.
+8. Старые плитки не сломаны.
+
+CURL CHECK:
+
+curl -s -X POST "http://127.0.0.1:8788/wb/workflows/plan" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "title":"Проверка всех агентов",
+    "userRequest":"Создать мини-воронку для продажи консультации по нейросетям за 5000 руб"
+  }'
+
+В ответе проверить:
+workflow.steps должен содержать agentKey:
+
+ceo
+operations
+funnel
+content_strategy
+rewriter
+tech_architect
+ceo
+
+Если там только ceo/operations — правка не принята.
+
+ОТЧЁТ:
+Верни строго:
+
+1. ПРОХОД 11 СДЕЛАН / НЕ СДЕЛАН
+2. Root cause, который исправил
+3. Какие файлы изменены
+4. Подтверждение, что App.tsx не трогал
+5. Подтверждение, что index.css не трогал
+6. Подтверждение, что brainApi/brainTypes не трогал
+7. Новая full-team цепочка шагов
+8. Результат grep draft.steps
+9. Результат curl plan с workflow.steps
+10. Что сделал с сырой разметкой
+11. Результат grep helper-компонентов
+12. Остались ли <pre> в AgentsHubPanel.tsx
+13. Результат pnpm run typecheck
+14. Результат pnpm run build
+15. Скрин workflow steps со всеми агентами
+16. Скрин нормального сообщения без сырого Markdown
+17. Подтверждение, что ручной чат работает
+18. Полный git status --short
+ПОЧЕМУ ИМЕННО ЭТО ИСПРАВИТ ПРОБЛЕМУ
+
+Сейчас логика такая:
+
+selectPrimaryAgent(userRequest)
+→ выбрать одного агента
+→ остальные агенты не участвуют
+
+После правки будет:
+
+fixed full-team pipeline
+→ каждый workflow всегда содержит всех агентов
+→ каждый агент делает свою часть
+→ каждый следующий агент видит предыдущие outputs через shared context
+
+Сейчас UI такой:
+
+сырой output модели → <pre> → пользователь видит ##, **, REVIEW_STATUS
+
+После правки будет:
+
+сырой output модели → cleanAgentText / ReviewMessageBlock → нормальная карточка сообщения
+КРИТЕРИЙ ГОТОВО
+
+Проход 11 готов только если:
+
+1. В workflow.steps всегда есть все агенты.
+2. Funnel больше не “пропадает”.
+3. Content Strategy больше не “пропадает”.
+4. Rewriter больше не “пропадает”.
+5. Tech Architect больше не “пропадает”.
+6. Operations не дублируется как primary при общем запросе.
+7. CEO остаётся в начале и в финале.
+8. Review gate остаётся.
+9. Revision loop остаётся.
+10. Сообщения читаются нормально.
+11. Сырой Markdown не торчит на экране.
+12. REVIEW_STATUS/REQUIRED_FIX не показываются как мусор, а превращаются в понятную карточку проверки.
+13. Ручной чат ниже не сломан.
+14. Старые плитки не тронуты.

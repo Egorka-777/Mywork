@@ -23,6 +23,109 @@ export type AgentsHubPanelProps = {
   onStateUpdated?: (state: BrainState) => void;
 };
 
+function cleanAgentText(text: string): string {
+  return text
+    .replace(/^#{1,6}\s*/gm, "")
+    .replace(/\*\*(.*?)\*\*/g, "$1")
+    .replace(/\[BRAIN LOG\]/g, "BRAIN LOG:")
+    .replace(/────/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function splitAgentText(text: string): string[] {
+  return cleanAgentText(text)
+    .split(/\n{2,}/)
+    .map((block) => block.trim())
+    .filter(Boolean);
+}
+
+function AgentMessageBlock({ text }: { text: string }) {
+  const blocks = splitAgentText(text);
+
+  return (
+    <div className="space-y-2 text-sm text-slate-100">
+      {blocks.map((block, index) => {
+        const lines = block.split("\n");
+        const isList = lines.length > 1 && lines.every((line) => /^[-✓✅•]|\d+\./.test(line.trim()));
+
+        if (isList) {
+          return (
+            <ul key={index} className="list-disc space-y-1 pl-5 text-slate-200">
+              {lines.map((line, lineIndex) => (
+                <li key={lineIndex}>
+                  {line.replace(/^[-✓✅•]\s*/, "").replace(/^\d+\.\s*/, "")}
+                </li>
+              ))}
+            </ul>
+          );
+        }
+
+        return (
+          <p key={index} className="whitespace-pre-wrap leading-relaxed">
+            {block}
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
+function parseReviewText(text: string): {
+  status: "passed" | "failed" | "unknown";
+  notes: string;
+  requiredFix: string;
+} {
+  const cleaned = cleanAgentText(text);
+  const statusMatch = cleaned.match(/REVIEW_STATUS:\s*(passed|failed)/i);
+  const status = statusMatch
+    ? (statusMatch[1].toLowerCase() as "passed" | "failed")
+    : "unknown";
+
+  const notesMatch = cleaned.match(/REVIEW_NOTES:\s*([\s\S]*?)(REQUIRED_FIX:|$)/i);
+  const fixMatch = cleaned.match(/REQUIRED_FIX:\s*([\s\S]*)/i);
+
+  return {
+    status,
+    notes: notesMatch?.[1]?.trim() || cleaned,
+    requiredFix: fixMatch?.[1]?.trim() || "none",
+  };
+}
+
+function ReviewMessageBlock({ text }: { text: string }) {
+  const review = parseReviewText(text);
+  const passed = review.status === "passed";
+  const failed = review.status === "failed";
+
+  return (
+    <div
+      className={`rounded-xl border p-3 text-sm ${
+        passed
+          ? "border-emerald-400/20 bg-emerald-500/10 text-emerald-50"
+          : failed
+            ? "border-red-400/20 bg-red-500/10 text-red-50"
+            : "border-white/10 bg-white/[0.04] text-slate-100"
+      }`}
+    >
+      <p className="font-semibold">
+        {passed ? "Проверка пройдена" : failed ? "Нужна доработка" : "Проверка"}
+      </p>
+
+      <div className="mt-2">
+        <p className="text-xs opacity-70">Комментарий</p>
+        <AgentMessageBlock text={review.notes} />
+      </div>
+
+      {review.requiredFix && review.requiredFix.toLowerCase() !== "none" ? (
+        <div className="mt-3">
+          <p className="text-xs opacity-70">Что исправить</p>
+          <AgentMessageBlock text={review.requiredFix} />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function AgentsHubPanel({
   onClose,
   onStateUpdated,
@@ -424,9 +527,9 @@ export function AgentsHubPanel({
                   <p className="text-xs font-medium text-cyan-300/90">
                     План CEO
                   </p>
-                  <pre className="mt-2 max-h-48 overflow-y-auto whitespace-pre-wrap text-xs text-slate-200">
-                    {wfActive.ceoPlan}
-                  </pre>
+                  <div className="mt-2 max-h-48 overflow-y-auto pr-2">
+                    <AgentMessageBlock text={wfActive.ceoPlan} />
+                  </div>
                 </div>
               ) : null}
 
@@ -458,9 +561,9 @@ export function AgentsHubPanel({
                   <p className="text-xs font-semibold text-emerald-300">
                     ✅ Финальный результат
                   </p>
-                  <pre className="mt-2 max-h-40 overflow-y-auto whitespace-pre-wrap text-sm text-white">
-                    {wfActive.finalResult}
-                  </pre>
+                  <div className="mt-2 max-h-72 overflow-y-auto pr-2">
+                    <AgentMessageBlock text={wfActive.finalResult} />
+                  </div>
                 </div>
               ) : null}
               {wfActive?.status === "failed" && wfActive.error ? (
@@ -757,14 +860,12 @@ function ActivityRow({ entry }: { entry: ActivityEntry }) {
         <span className="text-[10px] text-slate-600">· {entry.phase}</span>
       </div>
       {entry.text ? (
-        <div className="mt-1">
-          <p
-            className={`whitespace-pre-wrap text-[11px] leading-relaxed ${
-              isOutput ? "text-slate-200" : "text-slate-400 italic"
-            } ${!expanded && isLong ? "line-clamp-4" : ""}`}
-          >
-            {entry.text}
-          </p>
+        <div className={`mt-1 text-[11px] ${!expanded && isLong ? "line-clamp-4" : ""}`}>
+          {entry.phase === "review" ? (
+            <ReviewMessageBlock text={entry.text} />
+          ) : (
+            <AgentMessageBlock text={entry.text} />
+          )}
           {isLong ? (
             <button
               type="button"
@@ -838,14 +939,14 @@ function StepRow({ step, idx, isActive, isDone, isFailed }: StepRowProps) {
           {expanded ? (
             <div className="mt-1 space-y-1">
               {step.output ? (
-                <pre className="max-h-40 overflow-y-auto whitespace-pre-wrap text-[11px] text-slate-200">
-                  {step.output}
-                </pre>
+                <div className="mt-2 max-h-48 overflow-y-auto rounded-lg bg-black/20 p-3">
+                  <AgentMessageBlock text={step.output} />
+                </div>
               ) : null}
               {step.reviewOutput ? (
-                <pre className="max-h-28 overflow-y-auto whitespace-pre-wrap text-[11px] text-amber-200/80">
-                  {step.reviewOutput}
-                </pre>
+                <div className="mt-2">
+                  <ReviewMessageBlock text={step.reviewOutput} />
+                </div>
               ) : null}
             </div>
           ) : null}
