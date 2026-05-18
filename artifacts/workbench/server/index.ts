@@ -1123,6 +1123,8 @@ app.post("/wb/agents/:key/messages", async (req, res) => {
     const state = await readBrainState();
     const history = await listAgentMessages(agentKey, { limit: 20 });
 
+    const client = getAnthropicClient();
+
     const model = process.env[agent.modelEnv]?.trim();
     if (!model) {
       return res.status(500).json({
@@ -1139,8 +1141,6 @@ app.post("/wb/agents/:key/messages", async (req, res) => {
       agent.systemPrompt +
       "\n\n--- ТЕКУЩЕЕ СОСТОЯНИЕ ПРОЕКТА ---\n" +
       renderStateForAgent(state);
-
-    const client = getAnthropicClient();
     let response: Anthropic.Message;
     try {
       response = await client.messages.create({
