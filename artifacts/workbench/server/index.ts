@@ -1,3 +1,4 @@
+import Anthropic from "@anthropic-ai/sdk";
 import cors from "cors";
 import express from "express";
 import fs from "node:fs/promises";
@@ -6,6 +7,19 @@ import { fileURLToPath } from "node:url";
 import OpenAI from "openai";
 import { fal } from "@fal-ai/client";
 import multer from "multer";
+import {
+  appendAgentMessage,
+  appendBrainLog,
+  getAgentByKey,
+  listAgentMessages,
+  listAgents,
+  patchBrainState,
+  readBrainLog,
+  readBrainState,
+  renderStateForAgent,
+  type BrainAgent,
+  type BrainLogEntryType,
+} from "./brain";
 import {
   ExtractError,
   RewriteError,
@@ -84,6 +98,60 @@ app.use(cors({ origin: true }));
 app.use(express.json({ limit: "32mb" }));
 
 // ─── helpers ────────────────────────────────────────────────────────────────
+
+function getRequiredEnv(name: string): string {
+  const value = process.env[name]?.trim();
+  if (!value) {
+    throw new Error(`Missing required env: ${name}`);
+  }
+  return value;
+}
+
+function getOptionalPositiveInt(
+  value: unknown,
+  fallback: number,
+  max: number
+): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    return fallback;
+  }
+  return Math.min(Math.floor(parsed), max);
+}
+
+function toPublicAgent(agent: BrainAgent) {
+  return {
+    key: agent.key,
+    name: agent.name,
+    role: agent.role,
+  };
+}
+
+function getAnthropicClient() {
+  return new Anthropic({ apiKey: getRequiredEnv("ANTHROPIC_API_KEY") });
+}
+
+function extractAnthropicText(response: Anthropic.Message): string {
+  const parts: string[] = [];
+  for (const block of response.content) {
+    if (block.type === "text" && block.text.trim()) {
+      parts.push(block.text);
+    }
+  }
+  return parts.join("\n\n").trim();
+}
+
+function brainErrorStatus(message: string): number {
+  if (message.startsWith("Unknown agent key:")) return 404;
+  if (
+    message.includes("must be a non-empty string") ||
+    message.startsWith("Invalid entryType:") ||
+    message.startsWith("Invalid agent key:")
+  ) {
+    return 400;
+  }
+  return 500;
+}
 
 function isInstagramPostUrl(value: string) {
   return /^https:\/\/(www\.)?instagram\.com\/([\w.]+\/)?(p|reel)\//.test(value);
@@ -955,6 +1023,166 @@ app.post("/wb/source-rewriter/rewrite", async (req, res) => {
       return res.status(e.status).json(e.body);
     }
     return res.status(500).json({ error: "rewrite failed", detail: String(e) });
+  }
+});
+
+// ─── Agents Hub: brain + agents ─────────────────────────────────────────────
+
+app.get("/wb/brain/state", async (_req, res) => {
+  try {
+    const state = await readBrainState();
+    return res.json(state);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    return res.status(500).json({ error: message });
+  }
+});
+
+app.patch("/wb/brain/state", async (req, res) => {
+  try {
+    const body = req.body;
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      return res.status(400).json({ error: "Body must be a JSON object" });
+    }
+    const state = await patchBrainState(body as Record<string, unknown>);
+    return res.json(state);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    return res.status(brainErrorStatus(message)).json({ error: message });
+  }
+});
+
+app.get("/wb/brain/log", async (req, res) => {
+  try {
+    const limit = getOptionalPositiveInt(req.query.limit, 100, 500);
+    const entries = await readBrainLog({ limit });
+    return res.json({ entries });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    return res.status(500).json({ error: message });
+  }
+});
+
+app.post("/wb/brain/log", async (req, res) => {
+  try {
+    const body = req.body as {
+      agentKey?: string;
+      entryType?: string;
+      title?: string;
+      body?: string;
+      tags?: string[];
+    };
+    const entry = await appendBrainLog({
+      agentKey: body.agentKey ?? "",
+      entryType: (body.entryType ?? "") as BrainLogEntryType,
+      title: body.title ?? "",
+      body: body.body ?? "",
+      tags: body.tags,
+    });
+    return res.json({ entry });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    return res.status(brainErrorStatus(message)).json({ error: message });
+  }
+});
+
+app.get("/wb/agents", async (_req, res) => {
+  try {
+    const agents = await listAgents();
+    return res.json({ agents: agents.map(toPublicAgent) });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    return res.status(500).json({ error: message });
+  }
+});
+
+app.get("/wb/agents/:key/messages", async (req, res) => {
+  try {
+    const agentKey = req.params.key;
+    const limit = getOptionalPositiveInt(req.query.limit, 50, 200);
+    const messages = await listAgentMessages(agentKey, { limit });
+    return res.json({ messages });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    return res.status(brainErrorStatus(message)).json({ error: message });
+  }
+});
+
+app.post("/wb/agents/:key/messages", async (req, res) => {
+  try {
+    const agentKey = req.params.key;
+    const content =
+      typeof req.body?.content === "string" ? req.body.content.trim() : "";
+    if (!content) {
+      return res
+        .status(400)
+        .json({ error: "content must be a non-empty string" });
+    }
+
+    const agent = await getAgentByKey(agentKey);
+    const state = await readBrainState();
+    const history = await listAgentMessages(agentKey, { limit: 20 });
+
+    const model = process.env[agent.modelEnv]?.trim();
+    if (!model) {
+      return res.status(500).json({
+        error: `Missing required env: ${agent.modelEnv}`,
+      });
+    }
+
+    const userMessage = await appendAgentMessage(agentKey, {
+      role: "user",
+      content,
+    });
+
+    const system =
+      agent.systemPrompt +
+      "\n\n--- ТЕКУЩЕЕ СОСТОЯНИЕ ПРОЕКТА ---\n" +
+      renderStateForAgent(state);
+
+    const client = getAnthropicClient();
+    let response: Anthropic.Message;
+    try {
+      response = await client.messages.create({
+        model,
+        max_tokens: 4096,
+        system,
+        messages: [
+          ...history.map((message) => ({
+            role: message.role,
+            content: message.content,
+          })),
+          { role: "user", content },
+        ],
+      });
+    } catch (e) {
+      const detail = e instanceof Error ? e.message : String(e);
+      return res.status(502).json({
+        error: "Anthropic request failed",
+        detail,
+      });
+    }
+
+    const assistantText = extractAnthropicText(response);
+    if (!assistantText) {
+      return res.status(502).json({
+        error: "Anthropic request failed",
+        detail: "Empty assistant response",
+      });
+    }
+
+    const assistantMessage = await appendAgentMessage(agentKey, {
+      role: "assistant",
+      content: assistantText,
+    });
+
+    return res.json({ message: assistantMessage, userMessage });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    if (message.startsWith("Missing required env:")) {
+      return res.status(500).json({ error: message });
+    }
+    return res.status(brainErrorStatus(message)).json({ error: message });
   }
 });
 
