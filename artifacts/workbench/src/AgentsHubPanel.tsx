@@ -754,6 +754,7 @@ function ActivityRow({ entry }: { entry: ActivityEntry }) {
       <div className="flex items-center gap-1.5">
         <span className="text-xs leading-none">{icon}</span>
         <span className={`text-[11px] font-semibold ${color}`}>{label}</span>
+        <span className="text-[10px] text-slate-600">· {entry.phase}</span>
       </div>
       {entry.text ? (
         <div className="mt-1">
