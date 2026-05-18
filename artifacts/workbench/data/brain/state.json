@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": null,
+  "updatedAt": "2026-05-18T00:00:00.000Z",
   "goalYear": {
     "title": "1 млн в месяц",
     "description": "Построить систему контента, продуктов, продаж и рабочих процессов вокруг заработка на нейросетях.",
@@ -12,33 +12,140 @@
     "status": "active"
   },
   "focusWeek": {
-    "title": "Запустить Agents Hub в workbench",
-    "description": "Добавить большую плитку с агентами, ежедневной сводкой и файловым мозгом.",
+    "title": "Agents Hub запущен — первый рабочий день с агентами",
+    "description": "Hub работает: state, agents, log, chat — всё функционирует. Задача недели: поговорить с каждым агентом, записать первые решения в brain log, настроить ежедневный ритм.",
     "status": "active"
   },
-  "activeProducts": [],
+  "activeProducts": [
+    {
+      "id": "product-001",
+      "title": "Курс / обучение по нейросетям",
+      "description": "Обучение заработку на нейросетях: инструменты, контент, автоматизация, продажи.",
+      "status": "in_progress",
+      "format": "not_confirmed",
+      "price": "not_confirmed",
+      "audience": "Люди, которые хотят зарабатывать с помощью нейросетей, но не знают с чего начать.",
+      "notes": ["Основной продукт для монетизации аудитории", "Формат и цена требуют уточнения"]
+    },
+    {
+      "id": "product-002",
+      "title": "AI-рабочая система (Workbench)",
+      "description": "Инструмент для ведения бизнеса через нейросети: агенты, brain log, контент-пайплайн, трекер.",
+      "status": "in_progress",
+      "format": "SaaS / личный инструмент",
+      "price": "not_confirmed",
+      "audience": "Эксперты и предприниматели, которые хотят систематизировать работу с AI.",
+      "notes": ["Workbench сам по себе — демонстрация продукта", "Монетизация через обучение или лицензию — not_confirmed"]
+    },
+    {
+      "id": "product-003",
+      "title": "Контент-продукты (карусели, Reels, сторис)",
+      "description": "Готовые шаблоны, карусели, Reels и сторис-цепочки по теме нейросетей и заработка.",
+      "status": "active",
+      "format": "Цифровые материалы / шаблоны",
+      "price": "not_confirmed",
+      "audience": "Контент-мейкеры и эксперты, которые хотят быстро создавать контент по теме AI.",
+      "notes": ["Производство уже идёт через workbench (Carousel Remix, Source Rewriter)", "Упаковка и продажа — следующий шаг"]
+    }
+  ],
   "activeFunnel": {
-    "status": "draft",
-    "notes": []
+    "status": "in_progress",
+    "stages": [
+      {
+        "stage": "entry",
+        "channel": "Контент в Instagram, Telegram, TikTok, ВКонтакте",
+        "description": "Человек находит контент по теме нейросетей / заработка",
+        "confirmed": true
+      },
+      {
+        "stage": "trust",
+        "channel": "Подписка + регулярный контент",
+        "description": "Прогрев через ценный контент, кейсы, личный опыт Егора",
+        "confirmed": true
+      },
+      {
+        "stage": "social_proof",
+        "channel": "Отзывы, результаты, скриншоты",
+        "description": "Соцдоказательства: что работает, сколько заработано, примеры учеников",
+        "confirmed": "not_confirmed"
+      },
+      {
+        "stage": "lead",
+        "channel": "Лид-магнит / бесплатный материал",
+        "description": "Бесплатный полезный материал в обмен на контакт или подписку на рассылку",
+        "confirmed": "not_confirmed"
+      },
+      {
+        "stage": "conversion",
+        "channel": "Консультация / заявка / прямая продажа",
+        "description": "Переход от интереса к покупке через прямое предложение или консультацию",
+        "confirmed": "not_confirmed"
+      }
+    ],
+    "notes": [
+      "Вход через контент подтверждён — платформы работают",
+      "Соцдоказательства, лид-магниты и конверсия — not_confirmed, требуют проработки с агентом Funnel"
+    ]
+  },
+  "contentSystem": {
+    "platforms": ["Instagram", "Stories", "Threads", "Telegram", "TikTok", "VK"],
+    "formats": ["carousel", "reels", "stories", "post", "threads_post"],
+    "styleRules": [
+      "Живой, разговорный стиль — как будто Егор говорит другу",
+      "Фокус на деньги, нейросети, практику — без абстрактных советов",
+      "Не придумывать кейсы, цифры и результаты без подтверждения",
+      "Каждый пост начинается с хука — первые 2-3 слова должны цеплять",
+      "Короткие предложения, конкретные факты, без канцелярита",
+      "CTA в каждом посте — один, конкретный, с понятным следующим шагом"
+    ],
+    "prohibitions": [
+      "Не использовать GPT-обороты: 'безусловно', 'стоит отметить', 'в заключение'",
+      "Не писать как статья — без вступлений и резюме в конце",
+      "Не добавлять непроверенные цифры и кейсы"
+    ]
+  },
+  "workbenchFocus": {
+    "status": "launched",
+    "milestone": "Agents Hub запущен",
+    "description": "Все компоненты Hub работают: brain state, agents list, chat, brain log. API server стабилен.",
+    "nextSteps": [
+      "Поговорить с CEO-агентом: поставить цель на неделю и записать в brain log",
+      "Поговорить с Content Strategy агентом: составить план контента на неделю",
+      "Установить ANTHROPIC_API_KEY и ANTHROPIC_MODEL_CEO / ANTHROPIC_MODEL_EXECUTOR для активации агентов",
+      "Обновлять dailyTasks каждое утро через Operations агента",
+      "Записывать ключевые решения в brain log через кнопку 'Записать в мозг'"
+    ]
   },
   "dailyTasks": [
     {
-      "id": "task-001",
-      "title": "Опубликовать контент",
+      "id": "task-101",
+      "title": "Открыть Agents Hub и проверить, что всё работает",
       "status": "todo",
-      "source": "manual"
+      "source": "workbench_launch"
     },
     {
-      "id": "task-002",
-      "title": "Подготовить следующий материал",
+      "id": "task-102",
+      "title": "Написать CEO-агенту: какой главный фокус на эту неделю",
       "status": "todo",
-      "source": "manual"
+      "source": "agents_hub"
     },
     {
-      "id": "task-003",
-      "title": "Проверить задачи по сайту / рабочей среде",
+      "id": "task-103",
+      "title": "Записать первое решение в brain log (кнопка 'Записать в мозг')",
       "status": "todo",
-      "source": "manual"
+      "source": "agents_hub"
+    },
+    {
+      "id": "task-104",
+      "title": "Спросить Content Strategy агента: план контента на эту неделю",
+      "status": "todo",
+      "source": "agents_hub"
+    },
+    {
+      "id": "task-105",
+      "title": "Настроить ANTHROPIC_API_KEY в среде для активации агентов",
+      "status": "todo",
+      "source": "workbench_launch"
     }
   ],
   "frozen": {
