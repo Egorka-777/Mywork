@@ -1,0 +1,591 @@
+ЧТО ПОДТВЕРЖДЕНО ПО КОДУ
+1. Workflow backend действительно создан
+
+Есть agentWorkflow.ts. В нём уже есть:
+
+— AgentWorkflow;
+— steps;
+— memoryEvents;
+— activityLog;
+— currentActivity;
+— review status;
+— revision loop;
+— startWorkflowBackground.
+
+То есть агент не полностью соврал: основа backend workflow есть.
+
+2. Backend уже умеет background-start
+
+В server/index.ts есть endpoint:
+
+POST /wb/workflows/:id/start
+
+Он вызывает:
+
+startWorkflowBackground({ workflowId: req.params.id, llm: workflowLlm });
+
+и сразу возвращает:
+
+{ workflowId, status: "started" }
+
+Это как раз то, что нужно для “реального времени”.
+
+3. Frontend API уже имеет startWorkflow и fetchWorkflow
+
+В brainApi.ts уже есть:
+
+startWorkflow(workflowId)
+fetchWorkflow(workflowId)
+fetchWorkflows(limit)
+
+То есть API-owner уже готов для live polling.
+
+4. Но UI этим не пользуется
+
+В AgentsHubPanel.tsx импортируются:
+
+createWorkflowPlan
+runWorkflow
+
+но не импортируются:
+
+startWorkflow
+fetchWorkflow
+
+И кнопка запуска вызывает:
+
+const wf = await runWorkflow(wfActive.id);
+setWfActive(wf);
+
+То есть UI ждёт, пока весь workflow выполнится в одном HTTP-запросе. Это и даёт лаги/зависание/ощущение, что ничего не происходит.
+
+ЦЕПОЧКА ПРОБЛЕМЫ
+AgentsHubPanel.tsx
+→ handleWorkflowRun()
+→ вызывает runWorkflow()
+→ brainApi.ts отправляет POST /wb/workflows/:id/run
+→ server/index.ts выполняет runWorkflow синхронно
+→ runWorkflow делает несколько LLM-вызовов подряд
+→ UI ждёт один большой response
+→ пользователь не видит live-процесс
+→ если review failed, видит только уже упавший результат/простыню
+
+Правильная цепочка должна быть:
+
+AgentsHubPanel.tsx
+→ startWorkflow()
+→ POST /wb/workflows/:id/start
+→ backend запускает background run
+→ UI каждые 1–1.5 сек делает fetchWorkflow(id)
+→ показывает currentActivity/activityLog/steps
+→ пользователь видит живой пайплайн
+OWNER MAP
+Backend workflow owner
+artifacts/workbench/server/agentWorkflow.ts
+
+Сейчас трогать минимально. Там уже есть activityLog, currentActivity, startWorkflowBackground.
+
+Backend route owner
+artifacts/workbench/server/index.ts
+
+Уже есть /start, /run, /plan, /get. Пока не трогать, если curl подтверждает /start.
+
+Frontend API owner
+artifacts/workbench/src/brainApi.ts
+
+Уже есть startWorkflow и fetchWorkflow. Не менять без причины.
+
+UI owner
+artifacts/workbench/src/AgentsHubPanel.tsx
+
+Вот главный owner проблемы. Именно здесь сейчас нет live polling и нормального отображения activityLog/currentActivity.
+
+ЧТО НУЖНО ИСПРАВИТЬ СЕЙЧАС
+
+Не делать новый backend.
+
+Не переписывать workflow.
+
+Не трогать старые плитки.
+
+Не менять agentWorkflow.ts, пока не доказано, что /start не работает.
+
+Нужно сделать один точный проход:
+
+ПРОХОД 10 — LIVE WORKFLOW UI / POLLING FIX
+ГОТОВОЕ ТЗ ДЛЯ АГЕНТА
+ПРОХОД 10 — LIVE WORKFLOW UI / POLLING FIX
+
+ЦЕЛЬ:
+Сделать так, чтобы пользователь видел workflow в реальном времени: какой агент сейчас работает, что он читает, кому передал задачу, кто проверяет, где ревизия, где финал.
+
+КОРЕНЬ ПРОБЛЕМЫ:
+Сейчас AgentsHubPanel запускает workflow через runWorkflow(), то есть через синхронный POST /wb/workflows/:id/run. UI ждёт завершения всего workflow и не показывает live-процесс.
+
+В backend уже есть:
+POST /wb/workflows/:id/start
+startWorkflowBackground()
+activityLog
+currentActivity
+
+В brainApi.ts уже есть:
+startWorkflow()
+fetchWorkflow()
+
+Нужно подключить это в AgentsHubPanel.tsx.
+
+ГЛАВНОЕ ПРАВИЛО:
+Не переписывать workflow backend.
+Не трогать App.tsx.
+Не трогать AgentsHubCard.tsx.
+Не трогать index.css.
+Не трогать старые плитки.
+Не менять sourceRewriter/carousel/freedz/tracker.
+Не менять package.json/pnpm-lock.
+Главный файл правки: artifacts/workbench/src/AgentsHubPanel.tsx
+
+РАЗРЕШЕНО МЕНЯТЬ:
+1. artifacts/workbench/src/AgentsHubPanel.tsx
+
+РАЗРЕШЕНО ТОЛЬКО ПРОВЕРИТЬ:
+1. artifacts/workbench/src/brainApi.ts
+2. artifacts/workbench/src/brainTypes.ts
+3. artifacts/workbench/server/index.ts
+4. artifacts/workbench/server/agentWorkflow.ts
+
+ЗАПРЕЩЕНО МЕНЯТЬ:
+1. artifacts/workbench/src/App.tsx
+2. artifacts/workbench/src/AgentsHubCard.tsx
+3. artifacts/workbench/src/index.css
+4. artifacts/workbench/src/brainApi.ts, если startWorkflow/fetchWorkflow уже есть
+5. artifacts/workbench/src/brainTypes.ts, если activityLog/currentActivity уже есть
+6. artifacts/workbench/server/index.ts, если /start уже есть
+7. artifacts/workbench/server/agentWorkflow.ts, если activityLog/currentActivity уже пишутся
+8. artifacts/workbench/package.json
+9. pnpm-lock.yaml
+
+ПРЕДПРОВЕРКА:
+
+Выполнить:
+
+git status --short
+
+grep -n "startWorkflow\|fetchWorkflow\|runWorkflow" artifacts/workbench/src/brainApi.ts
+
+grep -n "currentActivity\|activityLog" artifacts/workbench/src/brainTypes.ts
+
+grep -n "/wb/workflows/:id/start\|startWorkflowBackground" artifacts/workbench/server/index.ts artifacts/workbench/server/agentWorkflow.ts
+
+grep -n "createWorkflowPlan\|runWorkflow" artifacts/workbench/src/AgentsHubPanel.tsx
+
+ОЖИДАНИЕ:
+- brainApi.ts уже содержит startWorkflow и fetchWorkflow
+- brainTypes.ts уже содержит currentActivity/activityLog
+- backend уже содержит /start
+- AgentsHubPanel.tsx сейчас использует runWorkflow, это и надо заменить
+
+ШАГ 1 — ИМПОРТЫ В AgentsHubPanel.tsx
+
+Открыть:
+
+artifacts/workbench/src/AgentsHubPanel.tsx
+
+Найти импорт из ./brainApi.
+
+Сейчас там есть:
+
+createWorkflowPlan
+fetchAgentMessages
+fetchAgents
+fetchBrainState
+runWorkflow
+saveBrainLogEntry
+sendAgentMessage
+
+Заменить runWorkflow на:
+
+fetchWorkflow
+startWorkflow
+
+Должно стать:
+
+import {
+  createWorkflowPlan,
+  fetchAgentMessages,
+  fetchAgents,
+  fetchBrainState,
+  fetchWorkflow,
+  saveBrainLogEntry,
+  sendAgentMessage,
+  startWorkflow
+} from "./brainApi";
+
+НЕ импортировать runWorkflow.
+
+ШАГ 2 — ДОБАВИТЬ STATE ДЛЯ POLLING
+
+Найти workflow state:
+
+const [wfTitle, setWfTitle] = useState("");
+const [wfRequest, setWfRequest] = useState("");
+const [wfActive, setWfActive] = useState<AgentWorkflow | null>(null);
+const [wfPlanning, setWfPlanning] = useState(false);
+const [wfRunning, setWfRunning] = useState(false);
+const [wfError, setWfError] = useState<string | null>(null);
+
+Добавить рядом:
+
+const [wfPollingId, setWfPollingId] = useState<string | null>(null);
+
+ШАГ 3 — ЗАМЕНИТЬ handleWorkflowRun
+
+Найти функцию:
+
+async function handleWorkflowRun() {
+  if (!wfActive?.id) return;
+  setWfRunning(true);
+  setWfError(null);
+  try {
+    const wf = await runWorkflow(wfActive.id);
+    setWfActive(wf);
+  } catch (e) {
+    setWfError(e instanceof Error ? e.message : String(e));
+  } finally {
+    setWfRunning(false);
+  }
+}
+
+Заменить полностью на:
+
+async function handleWorkflowRun() {
+  if (!wfActive?.id) return;
+
+  setWfRunning(true);
+  setWfError(null);
+
+  try {
+    await startWorkflow(wfActive.id);
+    setWfPollingId(wfActive.id);
+
+    const latest = await fetchWorkflow(wfActive.id);
+    setWfActive(latest);
+  } catch (e) {
+    setWfRunning(false);
+    setWfPollingId(null);
+    setWfError(e instanceof Error ? e.message : String(e));
+  }
+}
+
+ВАЖНО:
+Не использовать runWorkflow в UI.
+runWorkflow можно оставить в brainApi.ts для curl/manual debug, но UI должен использовать startWorkflow + fetchWorkflow.
+
+ШАГ 4 — ДОБАВИТЬ POLLING useEffect
+
+В AgentsHubPanel.tsx добавить useEffect после handleWorkflowRun или рядом с другими effects:
+
+useEffect(() => {
+  if (!wfPollingId) return;
+
+  let cancelled = false;
+  let timeoutId: number | undefined;
+
+  async function pollWorkflow() {
+    try {
+      const latest = await fetchWorkflow(wfPollingId);
+
+      if (cancelled) return;
+
+      setWfActive(latest);
+
+      const stillRunning =
+        latest.status === "running" ||
+        latest.status === "reviewing" ||
+        latest.status === "revision_required" ||
+        latest.status === "planned";
+
+      if (stillRunning) {
+        timeoutId = window.setTimeout(pollWorkflow, 1200);
+        return;
+      }
+
+      setWfRunning(false);
+      setWfPollingId(null);
+    } catch (e) {
+      if (cancelled) return;
+
+      setWfRunning(false);
+      setWfPollingId(null);
+      setWfError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  void pollWorkflow();
+
+  return () => {
+    cancelled = true;
+    if (timeoutId) {
+      window.clearTimeout(timeoutId);
+    }
+  };
+}, [wfPollingId]);
+
+ВАЖНО:
+- Не использовать setInterval.
+- Использовать setTimeout после завершения каждого fetch, чтобы не было наложения запросов.
+- Не polling каждые 100ms. 1200ms достаточно.
+- Не писать localStorage.
+- Не делать websocket.
+
+ШАГ 5 — ОБНОВИТЬ DISABLED ДЛЯ КНОПКИ
+
+Найти кнопку:
+
+"Запустить цепочку агентов"
+
+Сейчас disabled примерно:
+
+disabled={
+  wfRunning || !wfActive?.id || wfActive.status !== "planned"
+}
+
+Оставить это правило, но убедиться, что после start кнопка disabled, пока wfRunning true.
+
+Текст кнопки оставить:
+
+{wfRunning ? "Выполняется…" : "Запустить цепочку агентов"}
+
+Если сейчас написано "Запуск…" — заменить на "Выполняется…", чтобы было понятно, что процесс идёт.
+
+ШАГ 6 — ДОБАВИТЬ LIVE STATUS БЛОК
+
+Внутри workflow-блока, после кнопок и перед "План CEO", добавить:
+
+{wfActive?.currentActivity ? (
+  <div className="mt-4 rounded-xl border border-cyan-400/20 bg-cyan-500/10 p-3">
+    <p className="text-xs font-medium text-cyan-300">Сейчас</p>
+    <p className="mt-1 text-sm text-white">{wfActive.currentActivity}</p>
+  </div>
+) : null}
+
+ШАГ 7 — ДОБАВИТЬ ACTIVITY LOG
+
+После live status блока добавить:
+
+{wfActive?.activityLog?.length ? (
+  <div className="mt-4 rounded-xl border border-white/10 bg-black/20 p-3">
+    <p className="text-xs font-medium text-slate-300">
+      Живой журнал выполнения
+    </p>
+    <div className="mt-2 max-h-72 space-y-2 overflow-y-auto pr-2">
+      {wfActive.activityLog.slice(-30).map((entry) => (
+        <div
+          key={entry.id}
+          className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2"
+        >
+          <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+            <span>{entry.agentKey}</span>
+            <span>·</span>
+            <span>{entry.phase}</span>
+          </div>
+          <p className="mt-1 whitespace-pre-wrap text-xs text-slate-200">
+            {entry.text}
+          </p>
+        </div>
+      ))}
+    </div>
+  </div>
+) : null}
+
+ВАЖНО:
+Это не новый CSS.
+Только Tailwind-классы.
+Не трогать index.css.
+
+ШАГ 8 — УЛУЧШИТЬ ШАГИ, НЕ ДЕЛАТЬ ГИГАНТСКУЮ ПРОСТЫНЮ
+
+В блоке steps сейчас выводятся output и reviewOutput в pre с маленькой высотой.
+
+Оставить, но добавить над каждым step короткий status line:
+
+<p className="mt-1 text-slate-500">
+  status: {step.status} · review: {step.reviewStatus}
+  {step.revisionCount > 0 ? ` · revisions: ${step.revisionCount}` : ""}
+</p>
+
+Если уже есть похожая строка — только добавить revisionCount.
+
+НЕ переписывать весь layout.
+
+ШАГ 9 — НЕ ТРОГАТЬ REVIEW LOGIC
+
+В этом проходе НЕ менять:
+- parseReviewStatus
+- reviewer routing
+- revision loop
+- prompts
+- agentWorkflow.ts
+
+Сейчас задача только в том, чтобы пользователь видел процесс live.
+
+ШАГ 10 — ПРОВЕРКА TYPECHECK / BUILD
+
+Выполнить:
+
+cd artifacts/workbench
+pnpm run typecheck
+pnpm run build
+
+Если typecheck падает:
+- если ошибка в AgentsHubPanel.tsx — исправить только AgentsHubPanel.tsx
+- если ошибка в других файлах — не чинить в этом проходе, показать ошибку
+
+ШАГ 11 — SMOKE TEST
+
+Запустить:
+
+cd artifacts/workbench
+pnpm run dev
+
+Открыть:
+http://127.0.0.1:5180
+
+Проверить:
+1. Agents Hub открывается.
+2. Создать workflow через "Разобрать задачу".
+3. Появился план CEO.
+4. Нажать "Запустить цепочку агентов".
+5. Кнопка стала "Выполняется…".
+6. Появился блок "Сейчас".
+7. Появился "Живой журнал выполнения".
+8. В журнале появляются записи:
+   - system запускает цепочку
+   - CEO получает задачу
+   - CEO думает
+   - CEO output
+   - CEO → Operations review
+   - Operations review
+   - далее по шагам
+9. Страница не зависает.
+10. Можно видеть изменения без ожидания финального response.
+11. Если workflow failed — видно, на каком шаге и кто отклонил.
+12. Ручной чат ниже работает.
+13. Старые плитки не тронуты.
+
+ШАГ 12 — CURL CHECK
+
+Проверить backend отдельно:
+
+PLAN:
+
+curl -s -X POST "http://127.0.0.1:8788/wb/workflows/plan" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "title":"Live test",
+    "userRequest":"Проверить, как агенты передают задачу друг другу в Agents Hub"
+  }'
+
+START:
+
+curl -s -X POST "http://127.0.0.1:8788/wb/workflows/<id>/start"
+
+POLL:
+
+curl -s "http://127.0.0.1:8788/wb/workflows/<id>"
+
+Ожидание:
+- после start endpoint отвечает быстро
+- при повторном GET меняются currentActivity/activityLog/steps
+- workflow json обновляется во время выполнения
+
+ФОРМАТ ОТЧЁТА:
+Верни строго:
+
+1. ПРОХОД 10 СДЕЛАН / НЕ СДЕЛАН
+2. Root cause, который исправил
+3. Какие файлы изменены
+4. Подтверждение, что изменён только AgentsHubPanel.tsx
+5. Было: runWorkflow
+6. Стало: startWorkflow + fetchWorkflow polling
+7. Как работает polling
+8. Где выводится currentActivity
+9. Где выводится activityLog
+10. Результат grep:
+
+grep -n "startWorkflow\|fetchWorkflow\|wfPollingId\|currentActivity\|activityLog" artifacts/workbench/src/AgentsHubPanel.tsx
+
+11. Результат проверки, что runWorkflow больше не импортируется в AgentsHubPanel:
+
+grep -n "runWorkflow" artifacts/workbench/src/AgentsHubPanel.tsx || true
+
+12. Результат pnpm run typecheck
+13. Результат pnpm run build
+14. Результат curl plan/start/poll
+15. Скрин live status
+16. Скрин activity log
+17. Подтверждение, что ручной чат работает
+18. Подтверждение, что старые плитки не тронуты
+19. Полный git status --short
+ПОЧЕМУ ЭТО ИСПРАВИТ ИМЕННО ТВОЮ БОЛЬ
+
+Сейчас ты нажимаешь “Запустить цепочку”, и UI ждёт, пока backend закончит весь процесс.
+
+После прохода 10 будет так:
+
+Нажал “Запустить цепочку”
+→ backend стартовал в фоне
+→ UI раз в 1.2 сек читает workflow.json
+→ currentActivity обновляется
+→ activityLog пополняется
+→ steps меняют status
+→ ты видишь передачу задачи между агентами
+
+Это и есть то, что ты просишь: видимый пайплайн.
+
+ОТДЕЛЬНО ПРО ОШИБКИ НА СКРИНЕ
+
+На скриншоте виден не технический краш, а failed review:
+
+operations → rev: ceo
+status: reviewing · review: failed
+
+И CEO-ревьюер пишет, что Operations вышел за рамки роли: дал стратегический прогноз вместо операционной разбивки.
+
+Это значит: gate реально работает, но UI сейчас показывает это как грязную простыню, а не как понятный статус:
+
+Шаг Operations не принят
+Причина: вышел за рамки роли
+Что исправить: убрать стратегию, оставить порядок действий
+Система отправляет Operations на revision
+
+Это уже следующий проход после live polling:
+
+ПРОХОД 11 — REVIEW RESULT UX + GATE DISPLAY
+
+Но сначала нужно починить live-видимость. Иначе ты не поймёшь, что именно происходит.
+
+СЛЕДУЮЩИЙ ПРОХОД ПОСЛЕ ЭТОГО
+
+После прохода 10 делаем:
+
+ПРОХОД 11 — REVIEW GATE UX CLEANUP
+
+Там нужно будет:
+
+— убрать сырые REVIEW_STATUS;
+— красиво показать “принято / не принято”;
+— отдельно показывать REQUIRED_FIX;
+— не валить весь UI красной простынёй;
+— показать revision как отдельный мини-шаг;
+— сделать output/review сворачиваемыми.
+
+Но это после прохода 10.
+
+ИТОГ
+
+Сейчас агент сделал backend-часть лучше, чем UI-часть.
+
+Фактически:
+
+Backend: уже почти готов к live workflow.
+Frontend: всё ещё работает как sync-run и не показывает процесс нормально
