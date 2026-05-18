@@ -97,6 +97,36 @@ export type WorkflowOpenRouter = {
   }) => Promise<string>;
 };
 
+export type WorkflowLiveEventType =
+  | "workflow_started"
+  | "step_started"
+  | "step_thinking"
+  | "step_output"
+  | "review_started"
+  | "review_output"
+  | "revision_started"
+  | "revision_output"
+  | "step_completed"
+  | "step_failed"
+  | "workflow_completed"
+  | "workflow_failed";
+
+export type WorkflowLiveEvent = {
+  type: WorkflowLiveEventType;
+  ts: string;
+  agentKey: string;
+  stepTitle?: string;
+  stepIndex?: number;
+  totalSteps?: number;
+  text?: string;
+  reviewStatus?: ReviewStatus;
+  workflowStatus?: WorkflowStatus;
+  finalResult?: string;
+  error?: string;
+};
+
+export type WorkflowOnEvent = (event: WorkflowLiveEvent) => void;
+
 const WORKFLOW_PROTOCOL = `
 
 WORKFLOW PROTOCOL:
@@ -527,10 +557,17 @@ async function runReviewer(args: {
 export async function runWorkflow(input: {
   workflowId: string;
   llm: WorkflowOpenRouter;
+  onEvent?: WorkflowOnEvent;
 }): Promise<AgentWorkflow> {
   if (!process.env.OPENROUTER_API_KEY?.trim()) {
     throw new Error("Missing required env: OPENROUTER_API_KEY");
   }
+
+  const emit = (event: Omit<WorkflowLiveEvent, "ts">): void => {
+    if (input.onEvent) {
+      input.onEvent({ ...event, ts: new Date().toISOString() });
+    }
+  };
 
   const workflow = await readWorkflow(input.workflowId);
   if (workflow.status === "completed") {
@@ -556,6 +593,13 @@ export async function runWorkflow(input: {
   }
   await saveWorkflow(workflow);
 
+  emit({
+    type: "workflow_started",
+    agentKey: "ceo",
+    workflowStatus: "running",
+    text: `Запускаю цепочку: ${workflow.title}`,
+  });
+
   const resolveModel = (agentKey: WorkflowAgentKey): string => {
     const a = agents.find((x) => x.key === agentKey);
     if (!a) throw new Error(`Unknown agent: ${agentKey}`);
@@ -570,7 +614,8 @@ export async function runWorkflow(input: {
   };
 
   try {
-    for (const step of workflow.steps) {
+    for (let stepIdx = 0; stepIdx < workflow.steps.length; stepIdx++) {
+      const step = workflow.steps[stepIdx];
       step.status = "running";
       step.startedAt = new Date().toISOString();
       step.error = null;
@@ -582,6 +627,15 @@ export async function runWorkflow(input: {
 
       const agent = await getAgentByKey(step.agentKey);
       const model = resolveModel(step.agentKey);
+
+      emit({
+        type: "step_started",
+        agentKey: step.agentKey,
+        stepTitle: step.title,
+        stepIndex: stepIdx,
+        totalSteps: workflow.steps.length,
+        text: step.instruction,
+      });
 
       const runOneAgent = async (extra?: string) => {
         const shared = buildSharedWorkflowContext({
@@ -595,6 +649,13 @@ export async function runWorkflow(input: {
           (extra ? `Дополнительно:\n${extra}\n\n` : "") +
           `Исходный запрос пользователя:\n${workflow.userRequest}`;
 
+        emit({
+          type: "step_thinking",
+          agentKey: step.agentKey,
+          stepTitle: step.title,
+          stepIndex: stepIdx,
+        });
+
         return runAgentStep({
           agent,
           model,
@@ -606,11 +667,31 @@ export async function runWorkflow(input: {
 
       let output = await runOneAgent();
 
+      step.output = output.trim();
+      pushMemory(workflow, step.agentKey, "output", step.title, step.output);
+      await saveWorkflow(workflow);
+
+      emit({
+        type: "step_output",
+        agentKey: step.agentKey,
+        stepTitle: step.title,
+        stepIndex: stepIdx,
+        text: step.output,
+      });
+
       const runReview = async (candidateOutput: string) => {
         if (!step.reviewerKey) return "passed" as ReviewStatus;
 
         step.status = "reviewing";
         await saveWorkflow(workflow);
+
+        emit({
+          type: "review_started",
+          agentKey: step.reviewerKey,
+          stepTitle: step.title,
+          stepIndex: stepIdx,
+          text: `${step.reviewerKey} проверяет работу ${step.agentKey}…`,
+        });
 
         const reviewer = await getAgentByKey(step.reviewerKey);
         const revModel = resolveModel(step.reviewerKey);
@@ -640,18 +721,18 @@ export async function runWorkflow(input: {
           step.reviewOutput
         );
         await saveWorkflow(workflow);
+
+        emit({
+          type: "review_output",
+          agentKey: step.reviewerKey,
+          stepTitle: step.title,
+          stepIndex: stepIdx,
+          reviewStatus: rs,
+          text: step.reviewOutput,
+        });
+
         return rs;
       };
-
-      step.output = output.trim();
-      pushMemory(
-        workflow,
-        step.agentKey,
-        "output",
-        step.title,
-        step.output
-      );
-      await saveWorkflow(workflow);
 
       let reviewResult: ReviewStatus = "passed";
       if (step.reviewerKey) {
@@ -670,13 +751,16 @@ export async function runWorkflow(input: {
           const fix =
             reviewOut.match(/REQUIRED_FIX:\s*([\s\S]*)/i)?.[1]?.trim() ||
             "Усиль результат по замечаниям ревьюера.";
-          pushMemory(
-            workflow,
-            step.agentKey,
-            "revision",
-            "Revision requested",
-            fix
-          );
+          pushMemory(workflow, step.agentKey, "revision", "Revision requested", fix);
+
+          emit({
+            type: "revision_started",
+            agentKey: step.agentKey,
+            stepTitle: step.title,
+            stepIndex: stepIdx,
+            text: fix,
+          });
+
           output = await runOneAgent(
             `Ревью не прошло. Исправь и улучши output. Замечания:\n${reviewOut}\n\nТребуемое исправление:\n${fix}`
           );
@@ -690,18 +774,37 @@ export async function runWorkflow(input: {
           );
           await saveWorkflow(workflow);
 
+          emit({
+            type: "revision_output",
+            agentKey: step.agentKey,
+            stepTitle: step.title,
+            stepIndex: stepIdx,
+            text: step.output,
+          });
+
           const second = await runReview(step.output);
           if (second === "failed") {
             workflow.status = "failed";
-            workflow.error =
-              step.reviewOutput || "Review failed after revision";
+            workflow.error = step.reviewOutput || "Review failed after revision";
             await saveWorkflow(workflow);
+            emit({
+              type: "workflow_failed",
+              agentKey: step.agentKey,
+              error: workflow.error,
+              workflowStatus: "failed",
+            });
             return workflow;
           }
         } else {
           workflow.status = "failed";
           workflow.error = step.reviewOutput || "Review failed";
           await saveWorkflow(workflow);
+          emit({
+            type: "workflow_failed",
+            agentKey: step.agentKey,
+            error: workflow.error,
+            workflowStatus: "failed",
+          });
           return workflow;
         }
       }
@@ -709,6 +812,14 @@ export async function runWorkflow(input: {
       step.status = "completed";
       step.completedAt = new Date().toISOString();
       await saveWorkflow(workflow);
+
+      emit({
+        type: "step_completed",
+        agentKey: step.agentKey,
+        stepTitle: step.title,
+        stepIndex: stepIdx,
+        totalSteps: workflow.steps.length,
+      });
     }
 
     const lastCeoStep = [...workflow.steps]
@@ -720,20 +831,29 @@ export async function runWorkflow(input: {
       null;
     workflow.status = "completed";
     if (workflow.finalResult) {
-      pushMemory(
-        workflow,
-        "ceo",
-        "final",
-        "Final result",
-        workflow.finalResult
-      );
+      pushMemory(workflow, "ceo", "final", "Final result", workflow.finalResult);
     }
     await saveWorkflow(workflow);
+
+    emit({
+      type: "workflow_completed",
+      agentKey: "ceo",
+      workflowStatus: "completed",
+      finalResult: workflow.finalResult ?? undefined,
+      text: "Цепочка агентов завершена",
+    });
+
     return workflow;
   } catch (e) {
     workflow.status = "failed";
     workflow.error = e instanceof Error ? e.message : String(e);
     await saveWorkflow(workflow);
+    emit({
+      type: "workflow_failed",
+      agentKey: "ceo",
+      error: workflow.error,
+      workflowStatus: "failed",
+    });
     throw e;
   }
 }

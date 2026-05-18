@@ -15,6 +15,7 @@ import { CarouselRemixPanel } from "./CarouselRemixPanel";
 import { FreedzPanel } from "./FreedzPanel";
 import { SourceRewriterPanel } from "./SourceRewriterPanel";
 import { TrackerTile } from "./TrackerTile";
+import { WorkflowLivePanel } from "./WorkflowLivePanel";
 
 type FreedzMeta = {
   automationEnabled: boolean;
@@ -30,6 +31,7 @@ export default function App() {
   const [openCarouselRemix, setOpenCarouselRemix] = useState(false);
   const [openSourceRewriter, setOpenSourceRewriter] = useState(false);
   const [openAgentsHub, setOpenAgentsHub] = useState(false);
+  const [openWorkflowLive, setOpenWorkflowLive] = useState(false);
   const [brainState, setBrainState] = useState<BrainState | null>(null);
   const [agentsCount, setAgentsCount] = useState(0);
   const [brainLoading, setBrainLoading] = useState(false);
@@ -134,6 +136,7 @@ export default function App() {
             loading={brainLoading}
             error={brainError}
             onOpen={() => setOpenAgentsHub(true)}
+            onOpenLive={() => setOpenWorkflowLive(true)}
           />
           <TrackerTile />
           <FreedzCard
@@ -173,6 +176,9 @@ export default function App() {
           onClose={() => setOpenAgentsHub(false)}
           onStateUpdated={setBrainState}
         />
+      ) : null}
+      {openWorkflowLive ? (
+        <WorkflowLivePanel onClose={() => setOpenWorkflowLive(false)} />
       ) : null}
     </div>
   );

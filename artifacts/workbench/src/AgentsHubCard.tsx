@@ -6,6 +6,7 @@ export type AgentsHubCardProps = {
   loading: boolean;
   error: string | null;
   onOpen: () => void;
+  onOpenLive?: () => void;
 };
 
 export function AgentsHubCard({
@@ -14,6 +15,7 @@ export function AgentsHubCard({
   loading,
   error,
   onOpen,
+  onOpenLive,
 }: AgentsHubCardProps) {
   const tasks = state?.dailyTasks ?? [];
   const doneTasks = tasks.filter((task) => task.status === "done").length;
@@ -80,7 +82,16 @@ export function AgentsHubCard({
           </div>
         ) : null}
 
-        <div className="mt-auto flex justify-end">
+        <div className="mt-auto flex flex-wrap items-center justify-end gap-2">
+          {onOpenLive ? (
+            <button
+              type="button"
+              onClick={onOpenLive}
+              className="rounded-full border border-cyan-400/30 bg-cyan-500/10 px-4 py-2 text-sm font-semibold text-cyan-300 transition hover:bg-cyan-500/20 hover:text-cyan-100"
+            >
+              Цепочка live ▶
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={onOpen}
