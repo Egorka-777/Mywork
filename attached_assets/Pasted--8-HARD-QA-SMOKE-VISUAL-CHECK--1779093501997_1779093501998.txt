@@ -1,0 +1,442 @@
+ЧТО СЕЙЧАС НУЖНО ДОДЕЛАТЬ
+ДОБИВОЧНЫЙ ПРОХОД 8 — HARD QA / SMOKE / VISUAL CHECK
+Цель
+
+Доказать, что всё реально работает, а не просто лежит в коде.
+
+Что проверить
+1. typecheck
+2. build
+3. backend routes через curl
+4. frontend UI
+5. open/close Agents Hub
+6. список агентов
+7. отправка сообщения агенту
+8. понятная env-ошибка, если Anthropic не настроен
+9. запись ответа в мозг
+10. старые плитки не сломаны
+Готовое ТЗ агенту
+ПРОХОД 8 — HARD QA / SMOKE / VISUAL CHECK
+
+ЦЕЛЬ:
+Проверить фактическую работоспособность Agents Hub после интеграции. Код без необходимости не менять.
+
+ГЛАВНОЕ ПРАВИЛО:
+В этом проходе сначала только проверка. Исправления делать только если ошибка точно локализована и только в owner-файле.
+
+ЗАПРЕЩЕНО:
+- не переписывать App.tsx без доказательства
+- не менять старые плитки
+- не менять backend routes без точной ошибки
+- не менять brainApi.ts без точной ошибки контракта
+- не менять CSS
+- не добавлять новые функции
+- не делать UX-polish
+
+КОМАНДЫ:
+
+git status --short
+
+cd artifacts/workbench
+pnpm run typecheck
+pnpm run build
+
+Запустить:
+pnpm run dev
+
+В отдельном терминале:
+
+export WB_API="http://127.0.0.1:8788"
+
+curl -s "$WB_API/wb/health"
+curl -s "$WB_API/wb/brain/state"
+curl -s "$WB_API/wb/agents"
+curl -s "$WB_API/wb/agents/ceo/messages"
+curl -s "$WB_API/wb/brain/log?limit=5"
+
+POST log test:
+
+curl -s -X POST "$WB_API/wb/brain/log" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "agentKey":"ceo",
+    "entryType":"note",
+    "title":"QA smoke test",
+    "body":"Проверка записи в brain log.",
+    "tags":["qa","smoke"]
+  }'
+
+После этого:
+
+curl -s "$WB_API/wb/brain/log?limit=5"
+
+POST agent test без env или с env:
+
+curl -s -X POST "$WB_API/wb/agents/ceo/messages" \
+  -H "Content-Type: application/json" \
+  -d '{"content":"Коротко скажи, что мне делать сегодня по workbench."}'
+
+ОЖИДАНИЕ:
+Если env не настроен — JSON error:
+Missing required env: ANTHROPIC_API_KEY
+или
+Missing required env: ANTHROPIC_MODEL_CEO
+
+Если env настроен — JSON с message и запись в:
+artifacts/workbench/data/brain/conversations/ceo.jsonl
+
+UI CHECK:
+Открыть:
+http://127.0.0.1:5180
+
+Проверить:
+1. Страница открывается.
+2. Agents Hub плитка первая.
+3. На плитке виден фокус недели.
+4. На плитке видно количество задач.
+5. На плитке видно количество агентов.
+6. Кнопка "Открыть рабочую панель" открывает панель.
+7. Панель закрывается.
+8. В панели видны задачи дня.
+9. В панели виден список агентов.
+10. Переключение агентов работает.
+11. История сообщений грузится.
+12. Отправка сообщения либо работает, либо показывает понятную env-ошибку.
+13. У assistant-сообщения есть "Записать в мозг".
+14. Сохранение в мозг создаёт запись в log.
+15. Telegram Tracker открывается.
+16. Threads/Freedz открывается.
+17. Carousel Remix открывается.
+18. Source Rewriter открывается.
+
+ОТЧЁТ:
+Верни строго:
+
+1. ПРОХОД 8 СДЕЛАН / НЕ СДЕЛАН
+2. git status --short
+3. pnpm run typecheck result
+4. pnpm run build result
+5. curl /wb/health result
+6. curl /wb/brain/state result
+7. curl /wb/agents result
+8. curl /wb/agents/ceo/messages result
+9. POST /wb/brain/log result
+10. POST /wb/agents/ceo/messages result
+11. Проверка conversations/ceo.jsonl
+12. Проверка log.jsonl
+13. UI screenshot Agents Hub card
+14. UI screenshot Agents Hub panel
+15. UI screenshot old tiles still visible
+16. Проверка старых 4 плиток
+17. Какие файлы были изменены, если были
+18. Если были фиксы — точный файл, причина, diff
+ДОБИВОЧНЫЙ ПРОХОД 9 — PROMPTS UPGRADE
+Что сейчас не так
+
+Промпты есть, но они черновые и слишком короткие.
+
+Например, tech_architect сейчас содержит только короткую инструкцию про ROOT FIRST / OWNER MAP / NO LAYERS. Это не вся твоя реальная система контроля: там нет полного формата отчёта, запретов, проверок, route/page/style/data/side effects цепочки, требований к grep/diff/build/visual proof.
+
+То же самое по другим агентам:
+
+— ceo слишком общий;
+— operations слишком общий;
+— funnel слишком общий;
+— content_strategy слишком общий;
+— rewriter слишком общий;
+— tech_architect нужно усилить сильнее всех.
+
+Правильный план
+
+Не менять код.
+
+Менять только:
+
+artifacts/workbench/data/brain/agents.json
+Готовое ТЗ агенту
+ПРОХОД 9 — PROMPTS UPGRADE
+
+ЦЕЛЬ:
+Усилить systemPrompt у 6 агентов в artifacts/workbench/data/brain/agents.json.
+
+ГЛАВНОЕ ПРАВИЛО:
+Не менять код. Не менять schema. Не добавлять новые поля. Только заменить systemPrompt у существующих агентов.
+
+РАЗРЕШЕНО МЕНЯТЬ:
+artifacts/workbench/data/brain/agents.json
+
+ЗАПРЕЩЕНО МЕНЯТЬ:
+artifacts/workbench/src/*
+artifacts/workbench/server/*
+artifacts/workbench/package.json
+pnpm-lock.yaml
+.env.example
+state.json
+.gitignore
+
+ЧТО СДЕЛАТЬ:
+
+1. ceo
+Сделать промпт не просто "держи фокус", а:
+- цель 1 млн в месяц
+- отсекать лишние идеи
+- каждый ответ заканчивать next action
+- не фантазировать
+- отделять стратегию от операционки
+- фиксировать решения, которые стоит записать в brain log
+
+2. operations
+Сделать промпт:
+- daily tasks
+- приоритеты на день
+- контроль выполнения
+- разбиение больших задач на проходы
+- не давать 10 задач сразу
+- формат: сегодня / порядок / что не делать / отчёт
+
+3. funnel
+Сделать промпт:
+- оффер
+- лид-магнит
+- прогрев
+- доверие
+- соцдоказательства
+- CTA
+- контент → заявка → продажа
+- не придумывать цифры
+- если данных нет — спрашивать или помечать как not confirmed
+
+4. content_strategy
+Сделать промпт:
+- Instagram / Reels / Stories / Threads / Telegram / TikTok / VK
+- контент под заработок на нейросетях
+- не писать как статья
+- хуки
+- карусели
+- сторис-цепочки
+- социальные доказательства
+- стиль Егора: живой, прямой, без канцелярита
+
+5. rewriter
+Сделать промпт:
+- переписывать под стиль Егора
+- сохранять смысл
+- не выдумывать факты
+- усиливать подачу
+- убирать GPT-стиль
+- делать несколько вариантов, если просят
+- форматировать под площадку
+
+6. tech_architect
+Сделать самый жёсткий промпт:
+- ROOT FIRST
+- OWNER MAP
+- NO LAYERS
+- ROUTE → PAGE OWNER → COMPONENT TREE → STYLE OWNER → DATA FLOW → SIDE EFFECTS
+- запрет PASS/FINAL FIX/temporary override
+- запрет !important без доказательства
+- запрет backend/API/payload/proxy/upload без прямой причины
+- требование grep/diff/typecheck/build/manual visual proof
+- формат проверки отчёта агента
+- формат ТЗ для Cursor
+- не фантазировать по файлам, если файл не видел
+
+ПРОВЕРКА:
+python -m json.tool artifacts/workbench/data/brain/agents.json >/tmp/agents-check.json
+grep -n "\"key\": \"ceo\"\|\"key\": \"operations\"\|\"key\": \"funnel\"\|\"key\": \"content_strategy\"\|\"key\": \"rewriter\"\|\"key\": \"tech_architect\"" artifacts/workbench/data/brain/agents.json
+
+cd artifacts/workbench
+pnpm run typecheck
+
+ОТЧЁТ:
+1. ПРОХОД 9 СДЕЛАН / НЕ СДЕЛАН
+2. Изменённый файл
+3. JSON validation result
+4. Список агентов
+5. Что изменено по каждому prompt
+6. Подтверждение, что код не трогал
+7. git diff -- artifacts/workbench/data/brain/agents.json
+ДОБИВОЧНЫЙ ПРОХОД 10 — STATE / REAL CONTEXT UPGRADE
+Что сейчас не так
+
+state.json сейчас технически валиден, но слишком общий:
+
+goalYear: 1 млн в месяц
+focusQuarter: собрать управляемую систему
+focusWeek: запустить Agents Hub
+dailyTasks: 3 общие задачи
+
+Это нормальный старт, но для реальной работы агентов мало.
+
+Там нет:
+
+— твоих активных продуктов;
+— текущей воронки;
+— контент-направлений;
+— соцсетей;
+— правил стиля;
+— текущих рабочих ограничений;
+— списка “что сейчас делаем / что не делаем”;
+— недельного фокуса после запуска Agents Hub.
+
+Готовое ТЗ агенту
+ПРОХОД 10 — BRAIN STATE UPGRADE
+
+ЦЕЛЬ:
+Обновить artifacts/workbench/data/brain/state.json под реальный контекст Егора.
+
+ГЛАВНОЕ ПРАВИЛО:
+Не менять schema радикально. Не менять backend/frontend. Только расширить state.json безопасными полями.
+
+РАЗРЕШЕНО МЕНЯТЬ:
+artifacts/workbench/data/brain/state.json
+
+ЗАПРЕЩЕНО МЕНЯТЬ:
+artifacts/workbench/src/*
+artifacts/workbench/server/*
+package.json
+pnpm-lock.yaml
+agents.json
+
+ДОБАВИТЬ / УТОЧНИТЬ В state.json:
+
+1. activeProducts
+Добавить реальные направления:
+- курс/обучение по заработку на нейросетях
+- рабочая среда / AI-система
+- контент-продукты / карусели / Reels / сторис
+
+2. activeFunnel
+Уточнить:
+- текущий статус
+- вход через контент
+- соцдоказательства
+- прогрев
+- консультация/заявка/продажа, если подтверждено
+- если не подтверждено — писать "not_confirmed"
+
+3. contentSystem
+Добавить:
+- platforms: Instagram, Stories, Threads, Telegram, TikTok, VK
+- formats: carousel, reels, stories, posts
+- styleRules:
+  - не писать как статья
+  - живой разговорный стиль
+  - фокус на деньгах/нейросетях/практике
+  - не придумывать кейсы и цифры
+
+4. workbenchFocus
+Добавить:
+- Agents Hub запущен
+- следующий фокус: проверка, промпты, ежедневные задачи, лог решений
+
+5. dailyTasks
+Обновить задачи на реальные после запуска:
+- проверить Agents Hub UI
+- проверить чат с CEO agent
+- записать первое решение в brain log
+- обновить prompts
+- обновить state под реальный контекст
+
+6. frozen.doNotTouch
+Сохранить текущие ограничения:
+- не трогать старые четыре плитки без отдельного прохода
+- не подключать DB
+- не менять Creovix
+- не трогать upload/proxy/payload
+- не путать telegram state и brain state
+
+ПРОВЕРКА:
+python -m json.tool artifacts/workbench/data/brain/state.json >/tmp/state-check.json
+cd artifacts/workbench && pnpm run typecheck
+
+ОТЧЁТ:
+1. ПРОХОД 10 СДЕЛАН / НЕ СДЕЛАН
+2. Изменённый файл
+3. JSON validation result
+4. Что добавлено
+5. Что не трогал
+6. git diff -- artifacts/workbench/data/brain/state.json
+ДОБИВОЧНЫЙ ПРОХОД 11 — UX FIXES AFTER QA
+Делать только после прохода 8
+
+Пока не надо делать вслепую.
+
+Потенциальные UX-доработки, которые могут понадобиться:
+
+1. auto-scroll чата вниз после отправки
+2. Enter / Ctrl+Enter для отправки
+3. отдельная кнопка Refresh summary на карточке или панели
+4. красивее показать env error
+5. показать "мозг записан" после save log
+6. показать timestamp сообщений
+7. добавить пустое состояние "выберите агента"
+8. улучшить mobile layout панели
+9. добавить Esc для закрытия панели
+10. добавить блок "последние записи мозга"
+
+Но это не делать до QA. Сначала надо понять, что реально болит.
+
+ДОБИВОЧНЫЙ ПРОХОД 12 — BACKEND HARDENING
+Что можно усилить
+
+Backend уже рабочий по структуре, но есть места для укрепления:
+
+appendBrainLog сейчас принимает tags как string[] по типу, но runtime-жёсткой проверки массива строк в brain.ts нет. Надо добавить нормализацию tags.
+readErrorMessage в brainApi.ts сначала пытается response.json(), потом response.text(). Если body уже consumed, fallback может потерять текст не-JSON ошибки. Можно улучшить через response.clone().
+/wb/health пока не показывает anthropic readiness. Сейчас health показывает openrouter/fal/threads/apify, но для Agents Hub полезно добавить:
+anthropic: !!process.env.ANTHROPIC_API_KEY
+anthropicModelCeo: !!process.env.ANTHROPIC_MODEL_CEO
+anthropicModelExecutor: !!process.env.ANTHROPIC_MODEL_EXECUTOR
+Можно добавить GET /wb/brain/health, но не обязательно.
+Делать отдельным проходом, не сейчас
+
+Потому что это уже не “завершить MVP”, а hardening.
+
+ЧТО НЕ НАДО ДЕЛАТЬ СЕЙЧАС
+
+Не надо сейчас:
+
+— подключать OpenHuman;
+— переводить brain на PostgreSQL;
+— делать Obsidian vault;
+— делать SQLite chunks;
+— делать auto-fetch Gmail/Notion/GitHub;
+— делать календарь;
+— делать публикации во все соцсети;
+— прятать старые четыре плитки;
+— переписывать дизайн всего workbench.
+
+Сейчас нужно сначала доказать, что MVP Agents Hub работает.
+
+ПРИОРИТЕТНЫЙ ПОРЯДОК
+
+Делать строго так:
+
+1. ПРОХОД 8 — HARD QA / SMOKE / VISUAL CHECK
+2. ПРОХОД 9 — PROMPTS UPGRADE
+3. ПРОХОД 10 — STATE / REAL CONTEXT UPGRADE
+4. ПРОХОД 11 — UX FIXES только после QA
+5. ПРОХОД 12 — BACKEND HARDENING
+МОЙ ЖЁСТКИЙ ВЫВОД
+
+Реализация дошла до состояния:
+
+кодовая основа готова
+frontend подключён
+backend подключён
+brain files есть
+agents есть
+панель есть
+карточка есть
+
+Но продукт ещё нельзя считать “готовым”, пока нет:
+
+1. typecheck/build proof
+2. curl proof
+3. visual proof
+4. Anthropic/env proof
+5. log write proof
+6. old tiles proof
+7. усиленных prompts
+8. нормального state под твой реальный контекст
