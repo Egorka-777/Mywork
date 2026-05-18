@@ -1,4 +1,3 @@
-import Anthropic from "@anthropic-ai/sdk";
 import cors from "cors";
 import express from "express";
 import fs from "node:fs/promises";
@@ -127,18 +126,30 @@ function toPublicAgent(agent: BrainAgent) {
   };
 }
 
-function getAnthropicClient() {
-  return new Anthropic({ apiKey: getRequiredEnv("ANTHROPIC_API_KEY") });
-}
+function extractOpenRouterText(completion: {
+  choices?: { message?: { content?: unknown } }[];
+}): string {
+  const content = completion.choices?.[0]?.message?.content;
 
-function extractAnthropicText(response: Anthropic.Message): string {
-  const parts: string[] = [];
-  for (const block of response.content) {
-    if (block.type === "text" && block.text.trim()) {
-      parts.push(block.text);
-    }
+  if (typeof content === "string") {
+    return content.trim();
   }
-  return parts.join("\n\n").trim();
+
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => {
+        if (part && typeof part === "object" && "text" in part) {
+          const text = (part as { text?: unknown }).text;
+          return typeof text === "string" ? text : "";
+        }
+        return "";
+      })
+      .filter(Boolean)
+      .join("\n\n")
+      .trim();
+  }
+
+  return "";
 }
 
 function brainErrorStatus(message: string): number {
@@ -1123,7 +1134,11 @@ app.post("/wb/agents/:key/messages", async (req, res) => {
     const state = await readBrainState();
     const history = await listAgentMessages(agentKey, { limit: 20 });
 
-    const client = getAnthropicClient();
+    if (!OPENROUTER_KEY) {
+      return res.status(500).json({
+        error: "Missing required env: OPENROUTER_API_KEY",
+      });
+    }
 
     const model = process.env[agent.modelEnv]?.trim();
     if (!model) {
@@ -1141,13 +1156,14 @@ app.post("/wb/agents/:key/messages", async (req, res) => {
       agent.systemPrompt +
       "\n\n--- ТЕКУЩЕЕ СОСТОЯНИЕ ПРОЕКТА ---\n" +
       renderStateForAgent(state);
-    let response: Anthropic.Message;
+
+    let completion: Awaited<ReturnType<typeof openrouter.chat.completions.create>>;
     try {
-      response = await client.messages.create({
+      completion = await openrouter.chat.completions.create({
         model,
         max_tokens: 4096,
-        system,
         messages: [
+          { role: "system", content: system },
           ...history.map((message) => ({
             role: message.role,
             content: message.content,
@@ -1158,15 +1174,15 @@ app.post("/wb/agents/:key/messages", async (req, res) => {
     } catch (e) {
       const detail = e instanceof Error ? e.message : String(e);
       return res.status(502).json({
-        error: "Anthropic request failed",
+        error: "OpenRouter request failed",
         detail,
       });
     }
 
-    const assistantText = extractAnthropicText(response);
+    const assistantText = extractOpenRouterText(completion);
     if (!assistantText) {
       return res.status(502).json({
-        error: "Anthropic request failed",
+        error: "OpenRouter request failed",
         detail: "Empty assistant response",
       });
     }

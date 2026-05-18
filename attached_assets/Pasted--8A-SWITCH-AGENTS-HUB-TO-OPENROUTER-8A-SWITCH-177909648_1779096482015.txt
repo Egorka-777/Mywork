@@ -1,0 +1,420 @@
+ДОБИВОЧНЫЙ ПРОХОД 8A — SWITCH AGENTS HUB TO OPENROUTER
+
+Скопируй агенту целиком.
+
+ПРОХОД 8A — SWITCH AGENTS HUB FROM ANTHROPIC TO OPENROUTER
+
+ЦЕЛЬ:
+Перевести Agents Hub с прямого Anthropic API на уже существующий OpenRouter client в artifacts/workbench/server/index.ts.
+
+ПРИЧИНА:
+У пользователя нет возможности пополнить Anthropic напрямую. В проекте уже есть OPENROUTER_API_KEY и OpenRouter client для других workbench routes. Нужно использовать OpenRouter для Agents Hub.
+
+ГЛАВНОЕ ПРАВИЛО:
+Не трогать frontend.
+Не трогать AgentsHubCard.
+Не трогать AgentsHubPanel.
+Не трогать brainApi.
+Не трогать brainTypes.
+Не менять JSON brain storage.
+Не менять старые routes.
+Не подключать новый SDK.
+Не добавлять новый provider layer.
+Сделать минимальную замену только в backend owner.
+
+РАЗРЕШЕНО МЕНЯТЬ:
+1. artifacts/workbench/server/index.ts
+2. artifacts/workbench/data/brain/agents.json
+3. artifacts/workbench/.env.example
+4. artifacts/workbench/package.json — только если после удаления Anthropic SDK реально решим убрать dependency
+5. pnpm-lock.yaml — только если удаляем @anthropic-ai/sdk
+
+НА ПЕРВОМ ШАГЕ package.json НЕ ТРОГАТЬ.
+Сначала заменить runtime logic. Удаление Anthropic dependency — отдельный cleanup после проверки.
+
+ЗАПРЕЩЕНО МЕНЯТЬ:
+1. artifacts/workbench/src/App.tsx
+2. artifacts/workbench/src/AgentsHubCard.tsx
+3. artifacts/workbench/src/AgentsHubPanel.tsx
+4. artifacts/workbench/src/brainApi.ts
+5. artifacts/workbench/src/brainTypes.ts
+6. artifacts/workbench/src/index.css
+7. artifacts/workbench/server/brain.ts
+8. старые плитки и панели
+9. upload/proxy/payload/sourceRewriter logic
+10. Creovix
+11. api-server вне workbench
+
+ПРЕДПРОВЕРКА:
+Выполнить:
+
+git status --short
+
+grep -n "import Anthropic\|new Anthropic\|extractAnthropicText\|client.messages.create\|ANTHROPIC_API_KEY\|ANTHROPIC_MODEL" artifacts/workbench/server/index.ts artifacts/workbench/data/brain/agents.json artifacts/workbench/.env.example artifacts/workbench/package.json
+
+grep -n "const OPENROUTER_KEY\|const openrouter = new OpenAI\|OPENROUTER_API_KEY" artifacts/workbench/server/index.ts
+
+grep -n "/wb/agents/:key/messages" artifacts/workbench/server/index.ts
+
+cd artifacts/workbench
+pnpm run typecheck
+
+ЕСЛИ typecheck падает до правки:
+Не чинить старый код.
+Показать ошибку и остановиться.
+
+ШАГ 1 — ОБНОВИТЬ agents.json:
+Открыть:
+
+artifacts/workbench/data/brain/agents.json
+
+Заменить modelEnv:
+
+Для ceo:
+"modelEnv": "ANTHROPIC_MODEL_CEO"
+на:
+"modelEnv": "OPENROUTER_AGENTS_MODEL_CEO"
+
+Для всех остальных:
+"modelEnv": "ANTHROPIC_MODEL_EXECUTOR"
+на:
+"modelEnv": "OPENROUTER_AGENTS_MODEL_EXECUTOR"
+
+НЕ менять key.
+НЕ менять name.
+НЕ менять role.
+НЕ менять systemPrompt в этом проходе.
+
+ШАГ 2 — ОБНОВИТЬ .env.example:
+Открыть:
+
+artifacts/workbench/.env.example
+
+Заменить:
+
+ANTHROPIC_API_KEY=
+ANTHROPIC_MODEL_CEO=
+ANTHROPIC_MODEL_EXECUTOR=
+
+на:
+
+OPENROUTER_API_KEY=
+OPENROUTER_AGENTS_MODEL_CEO=
+OPENROUTER_AGENTS_MODEL_EXECUTOR=
+
+Если OPENROUTER_API_KEY уже есть в другом env.example — не дублировать, но в artifacts/workbench/.env.example он должен быть явно указан.
+
+ШАГ 3 — УБРАТЬ ANTHROPIC IMPORT ИЗ server/index.ts:
+Открыть:
+
+artifacts/workbench/server/index.ts
+
+Найти:
+
+import Anthropic from "@anthropic-ai/sdk";
+
+Удалить эту строку.
+
+НЕ трогать import OpenAI from "openai";
+НЕ трогать существующий openrouter client.
+
+ШАГ 4 — УДАЛИТЬ extractAnthropicText:
+Найти функцию:
+
+function extractAnthropicText(response: Anthropic.Message): string {
+  ...
+}
+
+Удалить полностью.
+
+На её место добавить helper:
+
+function extractOpenRouterText(completion: Awaited<ReturnType<typeof openrouter.chat.completions.create>>): string {
+  const content = completion.choices[0]?.message?.content;
+
+  if (typeof content === "string") {
+    return content.trim();
+  }
+
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => {
+        if (part && typeof part === "object" && "text" in part) {
+          const text = (part as { text?: unknown }).text;
+          return typeof text === "string" ? text : "";
+        }
+        return "";
+      })
+      .filter(Boolean)
+      .join("\n\n")
+      .trim();
+  }
+
+  return "";
+}
+
+Если TypeScript ругается на сложный ReturnType, сделать проще:
+
+function extractOpenRouterText(completion: {
+  choices?: { message?: { content?: unknown } }[];
+}): string {
+  const content = completion.choices?.[0]?.message?.content;
+
+  if (typeof content === "string") {
+    return content.trim();
+  }
+
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => {
+        if (part && typeof part === "object" && "text" in part) {
+          const text = (part as { text?: unknown }).text;
+          return typeof text === "string" ? text : "";
+        }
+        return "";
+      })
+      .filter(Boolean)
+      .join("\n\n")
+      .trim();
+  }
+
+  return "";
+}
+
+Выбрать вариант, который проходит typecheck без изменения других файлов.
+
+ШАГ 5 — ПЕРЕПИСАТЬ POST /wb/agents/:key/messages:
+В route:
+
+app.post("/wb/agents/:key/messages", async (req, res) => { ... })
+
+Найти блок:
+
+const client = getAnthropicClient();
+let response: Anthropic.Message;
+try {
+  response = await client.messages.create({
+    model,
+    max_tokens: 4096,
+    system,
+    messages: [
+      ...history.map((message) => ({
+        role: message.role,
+        content: message.content,
+      })),
+      { role: "user", content },
+    ],
+  });
+} catch (e) {
+  ...
+}
+
+const assistantText = extractAnthropicText(response);
+
+Заменить на OpenRouter:
+
+let completion: Awaited<ReturnType<typeof openrouter.chat.completions.create>>;
+try {
+  completion = await openrouter.chat.completions.create({
+    model,
+    max_tokens: 4096,
+    messages: [
+      { role: "system", content: system },
+      ...history.map((message) => ({
+        role: message.role,
+        content: message.content,
+      })),
+      { role: "user", content },
+    ],
+  });
+} catch (e) {
+  const detail = e instanceof Error ? e.message : String(e);
+  return res.status(502).json({
+    error: "OpenRouter request failed",
+    detail,
+  });
+}
+
+const assistantText = extractOpenRouterText(completion);
+if (!assistantText) {
+  return res.status(502).json({
+    error: "OpenRouter request failed",
+    detail: "Empty assistant response",
+  });
+}
+
+ОСТАВИТЬ БЕЗ ИЗМЕНЕНИЙ:
+- чтение agent
+- чтение state
+- чтение history
+- проверка model через process.env[agent.modelEnv]
+- append user message
+- renderStateForAgent
+- append assistant message
+- return res.json({ message: assistantMessage, userMessage })
+
+ШАГ 6 — УДАЛИТЬ getAnthropicClient:
+Найти:
+
+function getAnthropicClient() {
+  return new Anthropic({ apiKey: getRequiredEnv("ANTHROPIC_API_KEY") });
+}
+
+Удалить.
+
+НО:
+Проверить, нужен ли getRequiredEnv где-то ещё.
+Если getRequiredEnv больше нигде не используется — удалить и его.
+Если используется — оставить.
+
+ВАЖНО:
+OPENROUTER_KEY уже задан выше:
+const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY || "";
+
+openrouter client уже создан.
+Не создавать второй OpenRouter client.
+
+ШАГ 7 — ДОБАВИТЬ ЯВНУЮ ПРОВЕРКУ OPENROUTER_KEY В ROUTE:
+Перед вызовом openrouter.chat.completions.create добавить:
+
+if (!OPENROUTER_KEY) {
+  return res.status(500).json({
+    error: "Missing required env: OPENROUTER_API_KEY",
+  });
+}
+
+Проверка model уже есть через process.env[agent.modelEnv]. Она должна теперь возвращать:
+Missing required env: OPENROUTER_AGENTS_MODEL_CEO
+или
+Missing required env: OPENROUTER_AGENTS_MODEL_EXECUTOR
+
+ШАГ 8 — ОБНОВИТЬ ТЕКСТ ОШИБОК:
+Заменить только в Agents Hub route:
+Anthropic request failed
+на:
+OpenRouter request failed
+
+НЕ менять старые OpenRouter routes для carousel/freedz/sourceRewriter.
+
+ШАГ 9 — НЕ УДАЛЯТЬ @anthropic-ai/sdk ПОКА:
+В этом проходе НЕ делать pnpm remove @anthropic-ai/sdk.
+Сначала проверить, что всё работает.
+Удаление зависимости — отдельный cleanup после успешного QA.
+
+ПРОВЕРКА:
+
+1. grep Anthropic:
+
+grep -n "Anthropic\|@anthropic-ai/sdk\|ANTHROPIC_API_KEY\|ANTHROPIC_MODEL\|extractAnthropicText\|messages.create" artifacts/workbench/server/index.ts artifacts/workbench/data/brain/agents.json artifacts/workbench/.env.example || true
+
+Ожидание:
+- в server/index.ts / agents.json / .env.example не должно быть Anthropic
+- package.json может ещё содержать @anthropic-ai/sdk до cleanup-прохода
+
+2. grep OpenRouter Agents env:
+
+grep -n "OPENROUTER_AGENTS_MODEL_CEO\|OPENROUTER_AGENTS_MODEL_EXECUTOR\|OPENROUTER_API_KEY" artifacts/workbench/server/index.ts artifacts/workbench/data/brain/agents.json artifacts/workbench/.env.example
+
+3. Проверить route:
+
+grep -n "OpenRouter request failed\|openrouter.chat.completions.create\|extractOpenRouterText\|/wb/agents/:key/messages" artifacts/workbench/server/index.ts
+
+4. JSON validation:
+
+python -m json.tool artifacts/workbench/data/brain/agents.json >/tmp/agents-check.json
+
+5. Typecheck/build:
+
+cd artifacts/workbench
+pnpm run typecheck
+pnpm run build
+
+6. Smoke без env:
+Если OPENROUTER_API_KEY не задан:
+
+curl -s -X POST "http://127.0.0.1:8788/wb/agents/ceo/messages" \
+  -H "Content-Type: application/json" \
+  -d '{"content":"Проверка OpenRouter Agents Hub"}'
+
+Ожидание:
+{ "error": "Missing required env: OPENROUTER_API_KEY" }
+
+Если OPENROUTER_API_KEY задан, но OPENROUTER_AGENTS_MODEL_CEO не задан:
+
+Ожидание:
+{ "error": "Missing required env: OPENROUTER_AGENTS_MODEL_CEO" }
+
+7. Smoke с env:
+В .env локально поставить реальные значения:
+
+OPENROUTER_API_KEY=...
+OPENROUTER_AGENTS_MODEL_CEO=anthropic/claude-sonnet-4
+OPENROUTER_AGENTS_MODEL_EXECUTOR=anthropic/claude-sonnet-4
+
+Если эта модель в твоём OpenRouter аккаунте недоступна — заменить в .env на доступную модель из OpenRouter Models.
+
+Потом:
+
+pnpm run dev
+
+curl -s -X POST "http://127.0.0.1:8788/wb/agents/ceo/messages" \
+  -H "Content-Type: application/json" \
+  -d '{"content":"Коротко скажи, что мне делать сегодня по workbench."}'
+
+Ожидание:
+- JSON с message
+- conversations/ceo.jsonl пополнился user и assistant
+
+Проверить:
+
+tail -n 5 artifacts/workbench/data/brain/conversations/ceo.jsonl
+
+ФОРМАТ ОТЧЁТА:
+Верни строго:
+
+1. ПРОХОД 8A СДЕЛАН / НЕ СДЕЛАН
+2. Какие файлы изменены
+3. Что заменено:
+   - Anthropic SDK import
+   - getAnthropicClient
+   - extractAnthropicText
+   - client.messages.create
+4. Как теперь вызывается OpenRouter
+5. Какие env теперь нужны
+6. Что изменено в agents.json
+7. Что изменено в .env.example
+8. Результат grep Anthropic
+9. Результат grep OpenRouter env
+10. Результат python -m json.tool agents.json
+11. Результат pnpm run typecheck
+12. Результат pnpm run build
+13. Результат curl без env или с env
+14. Подтверждение, что frontend не трогал
+15. Подтверждение, что старые routes не переписывал
+16. Полный git status --short
+КАКИЕ ENV ТЕБЕ НУЖНЫ БУДУТЬ ПОСЛЕ ПРАВКИ
+
+В artifacts/workbench/.env:
+
+OPENROUTER_API_KEY=твой_ключ_openrouter
+
+OPENROUTER_AGENTS_MODEL_CEO=anthropic/claude-sonnet-4
+OPENROUTER_AGENTS_MODEL_EXECUTOR=anthropic/claude-sonnet-4
+
+Если anthropic/claude-sonnet-4 в OpenRouter недоступен или дорогой, временно можно поставить любую доступную модель, например:
+
+OPENROUTER_AGENTS_MODEL_CEO=google/gemini-2.5-pro
+OPENROUTER_AGENTS_MODEL_EXECUTOR=google/gemini-2.5-flash
+
+или другую модель, которая реально есть у тебя в OpenRouter.
+
+Я не фиксирую конкретную модель как обязательную, потому что доступность и цены моделей в OpenRouter могут меняться. Модель должна жить только в .env.
+
+МОЙ ВЫВОД
+
+Для твоей ситуации правильный ход:
+
+Не Anthropic напрямую.
+Не серые Claude-прокси.
+Не новые SDK.
+А использовать уже существующий OpenRouter client в workbench.
