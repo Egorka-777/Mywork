@@ -67,6 +67,7 @@ const GROQ_API_KEY = process.env.GROQ_API_KEY || "";
 const WORKFLOW_CEO_MODEL =
   process.env.OPENROUTER_MODEL_CEO?.trim() ||
   process.env.OPENROUTER_AGENTS_MODEL_CEO?.trim() ||
+  process.env.OPENROUTER_AGENTS_MODEL_EXECUTOR?.trim() ||
   TEXT_MODEL;
 
 const openrouter = new OpenAI({
