@@ -37,11 +37,11 @@ export type WorkflowStepStatus =
 export type ReviewStatus = "not_started" | "passed" | "failed";
 
 export type WorkflowAgentKey =
-  | "ceo"
+  | "chief"
+  | "marketer"
+  | "content_maker"
+  | "copywriter"
   | "operations"
-  | "funnel"
-  | "content_strategy"
-  | "rewriter"
   | "tech_architect";
 
 export type WorkflowMemoryEvent = {
@@ -178,14 +178,21 @@ HANDOFF_SUMMARY:
 const REVIEW_PROTOCOL = `
 
 REVIEW PROTOCOL:
-Ты проверяешь output другого агента.
+Ты проверяешь output предыдущего шага.
+
+ЗАПРЕЩЕНО в ревью:
+- Упоминать других агентов по имени в REQUIRED_FIX.
+- Предлагать задачи вида "дать задачу X агенту", "передать Y", "вызвать систему".
+- Писать что-либо от имени системы или про workflow-процесс.
+- Только конкретное что не так в тексте и как улучшить содержание.
+
 Верни строго:
 
 REVIEW_STATUS: passed | failed
 REVIEW_NOTES:
-<конкретно что хорошо/плохо>
+<конкретно что хорошо/плохо в содержании>
 REQUIRED_FIX:
-<если failed — что исправить; если passed — "none">
+<если failed — что конкретно исправить в тексте; если passed — "none">
 `;
 
 function assertWorkflowId(id: string): string {
@@ -209,11 +216,11 @@ async function writeJsonAtomic(filePath: string, data: unknown): Promise<void> {
 
 function isWorkflowAgentKey(key: string): key is WorkflowAgentKey {
   return (
-    key === "ceo" ||
+    key === "chief" ||
+    key === "marketer" ||
+    key === "content_maker" ||
+    key === "copywriter" ||
     key === "operations" ||
-    key === "funnel" ||
-    key === "content_strategy" ||
-    key === "rewriter" ||
     key === "tech_architect"
   );
 }
@@ -234,15 +241,15 @@ export function selectPrimaryAgent(userRequest: string): WorkflowAgentKey {
 
   const funnel =
     /оффер|продаж|воронк|заявк|лид|продукт|цен|подписк|оплат|конверс|cta|клиент/i;
-  if (funnel.test(q)) return "funnel";
+  if (funnel.test(q)) return "marketer";
 
   const content =
     /контент|пост|карусел|reels|рилс|сторис|threads|telegram|тикток|tiktok|vk|ютуб|youtube|rubrics|рубрик|публикац/i;
-  if (content.test(q)) return "content_strategy";
+  if (content.test(q)) return "content_maker";
 
   const rewrite =
     /перепиши|текст|стиль|живее|рерайт|формулировк|заголовок|hook|хук/i;
-  if (rewrite.test(q)) return "rewriter";
+  if (rewrite.test(q)) return "copywriter";
 
   return "operations";
 }
@@ -252,19 +259,19 @@ export function selectReviewerForStep(
 ): WorkflowAgentKey {
   switch (stepAgentKey) {
     case "tech_architect":
-      return "ceo";
-    case "content_strategy":
-      return "rewriter";
-    case "rewriter":
-      return "content_strategy";
-    case "funnel":
-      return "ceo";
+      return "chief";
+    case "content_maker":
+      return "copywriter";
+    case "copywriter":
+      return "content_maker";
+    case "marketer":
+      return "chief";
     case "operations":
-      return "ceo";
-    case "ceo":
+      return "chief";
+    case "chief":
       return "operations";
     default:
-      return "ceo";
+      return "chief";
   }
 }
 
@@ -412,12 +419,13 @@ export async function createWorkflowDraft(
 }
 
 const AGENT_DISPLAY_NAMES: Record<string, string> = {
-  ceo: "CEO",
+  chief: "Главный",
+  marketer: "Маркетолог",
+  content_maker: "Контент",
+  copywriter: "Копирайтер",
   operations: "Operations",
-  funnel: "Funnel",
-  content_strategy: "Контент",
-  rewriter: "Rewriter",
   tech_architect: "Tech Arch",
+  analyst: "Аналитик",
   system: "Система",
 };
 
@@ -472,113 +480,113 @@ function buildWorkflowSteps(userRequest: string): AgentWorkflowStep[] {
     case "tech_architect":
       return [
         newStep(
-          "ceo",
+          "chief",
           "operations",
           "Уточнить цель и критерий готово",
-          "Сформулируй цель задачи, критерии успеха, ограничения. Пиши для Егора — что нужно получить на выходе, по каким критериям оценить результат, что запрещено менять."
+          "Сформулируй цель задачи, критерии успеха, ограничения. Только цели и критерии — не упоминай workflow, процессы, системы или специалистов. Что Егор получит на выходе и как это проверить."
         ),
         newStep(
           "operations",
-          "ceo",
-          "Разбить задачу на конкретные шаги для Егора",
-          "Составь список конкретных действий для Егора: что открыть, что найти, что изменить, что проверить. Только реальные действия — не упоминай агентов, системы, инструменты. Максимум 5 шагов в формате: СЕГОДНЯ / ПОРЯДОК / ЧТО НЕ ДЕЛАТЬ."
+          "chief",
+          "Разбить задачу на конкретные шаги",
+          "Составь список конкретных действий для Егора: что открыть, что найти, что изменить, что проверить. Только реальные действия — не упоминай других специалистов или системы. Максимум 5 шагов: СЕГОДНЯ / ПОРЯДОК / ЧТО НЕ ДЕЛАТЬ."
         ),
         newStep(
           "tech_architect",
-          "ceo",
+          "chief",
           "Техническая реализация и риски",
           "Укажи: owner-файл, что именно изменить (найти / заменить / удалить), как доказать через grep/diff, какие соседние файлы не трогать, какие риски."
         ),
         newStep(
-          "ceo",
+          "chief",
           null,
           "Финальный результат для Егора",
-          "Собери финальный ответ: конкретное решение, порядок действий, что принято, что спорно, next action. Не скрывай конфликты между шагами."
+          "Собери финальный ответ: конкретное решение, порядок действий, what принято, что спорно, next action."
         ),
       ];
 
-    case "funnel":
+    case "marketer":
       return [
         newStep(
-          "ceo",
+          "chief",
           "operations",
           "Уточнить цель и критерий готово",
-          "Сформулируй цель задачи. Что конкретно нужно: оффер, лид-магнит, путь продажи? По каким критериям оценить результат?"
+          "Сформулируй цель задачи. Что конкретно нужно: оффер, лид-магнит, путь продажи? По каким критериям оценить результат? Только цель и критерии — не упоминай процессы."
         ),
         newStep(
-          "funnel",
-          "ceo",
+          "marketer",
+          "chief",
           "Воронка, оффер и путь к продаже",
-          "Посмотри на задачу через продажи. Дай: конкретный оффер (формулировка выгоды), путь от внимания до заявки, CTA, лид-магнит если нужен. Никаких абстракций — только конкретные формулировки."
+          "Дай: конкретный оффер (формулировка выгоды покупателя), путь от внимания до заявки, CTA, лид-магнит если нужен. Никаких абстракций — только конкретные формулировки и структура воронки."
         ),
         newStep(
-          "content_strategy",
-          "rewriter",
+          "content_maker",
+          "copywriter",
           "Контентная подача",
-          "Как это подать аудитории? Дай хук, структуру поста/карусели/сторис, платформу, формат. Один конкретный контент для этой задачи."
+          "Как это подать аудитории? Дай хук, структуру поста/карусели/сторис, платформу, формат. Один конкретный контент-скелет для этой задачи."
         ),
         newStep(
-          "rewriter",
-          "content_strategy",
+          "copywriter",
+          "content_maker",
           "Финальный текст в стиле Егора",
           "Перепиши ключевые формулировки. Живо, коротко, без GPT-тона. Дай 2-3 варианта хука."
         ),
         newStep(
-          "ceo",
+          "chief",
           null,
           "Финальный результат для Егора",
           "Собери финальный ответ: готовый оффер + текст + порядок действий + next action."
         ),
       ];
 
-    case "content_strategy":
-    case "rewriter":
+    case "content_maker":
+    case "copywriter":
       return [
         newStep(
-          "ceo",
+          "chief",
           "operations",
           "Уточнить цель и критерий готово",
-          "Сформулируй цель задачи. Что конкретно нужно: пост, карусель, reels, сторис? Для какой платформы? Какой CTA? Какая аудитория?"
+          "Сформулируй цель задачи. Что конкретно нужно: пост, карусель, reels, сторис? Платформа? CTA? Аудитория? Только цель и критерии."
         ),
         newStep(
-          "content_strategy",
-          "rewriter",
+          "content_maker",
+          "copywriter",
           "Контентная подача",
-          "Дай хук, структуру, формат. Для карусели — скелет слайдов. Для поста — структура. Для reels — сценарий 30-60 сек. Конкретно, без стратегических рассуждений."
+          "Дай хук, структуру, формат. Карусель — скелет слайдов. Пост — структура. Reels — сценарий 30-60 сек. Конкретно, без стратегических рассуждений."
         ),
         newStep(
-          "rewriter",
-          "content_strategy",
+          "copywriter",
+          "content_maker",
           "Финальный текст в стиле Егора",
           "Перепиши в живой стиль Егора. Убери GPT-тон, канцелярит. Дай финальный текст готовый к публикации."
         ),
         newStep(
-          "ceo",
+          "chief",
           null,
           "Финальный результат для Егора",
           "Выдай готовый контент + подпись + CTA + следующий шаг."
         ),
       ];
 
-    default: // operations — ежедневные задачи, планирование, дисциплина
+    default: // operations
       return [
         newStep(
-          "ceo",
+          "chief",
           "operations",
           "Уточнить цель и критерий готово",
-          "Сформулируй цель задачи, критерии успеха, ограничения."
+          "Сформулируй цель задачи, критерии успеха, ограничения. Только цель и критерии."
         ),
         newStep(
           "operations",
-          "ceo",
-          "Разбить задачу на конкретные шаги для Егора",
-          "Составь список конкретных действий для Егора. Только реальные действия — не упоминай агентов, инструменты или системы. Максимум 3-5 шагов в формате: СЕГОДНЯ / ПОРЯДОК / ЧТО НЕ ДЕЛАТЬ / ОТЧЁТ."
+          "chief",
+          "Разбить задачу на конкретные шаги",
+          "Список конкретных действий для Егора. Только реальные действия — не упоминай других специалистов или инструменты. Максимум 3-5 шагов: СЕГОДНЯ / ПОРЯДОК / ЧТО НЕ ДЕЛАТЬ / ОТЧЁТ."
         ),
         newStep(
-          "ceo",
+          "chief",
           null,
           "Финальный результат для Егора",
-          "Собери финальный ответ: решение, порядок действий, next action."
+          "Финальный ответ: решение, порядок действий, next action."
         ),
       ];
   }
@@ -598,7 +606,7 @@ export async function createWorkflowPlan(input: {
   const brainState = await readBrainState();
   const brainLogEntries = await readBrainLog({ limit: 10 });
   const agents = await listAgents();
-  const ceoAgent = await getAgentByKey("ceo");
+  const ceoAgent = await getAgentByKey("chief");
 
   const draft = await createWorkflowDraft({ title, userRequest });
 
@@ -647,7 +655,7 @@ ${userRequest}
 
   draft.status = "planned";
   draft.memoryEvents = [];
-  pushMemory(draft, "ceo", "plan", "CEO plan", draft.ceoPlan);
+  pushMemory(draft, "chief", "plan", "Chief plan", draft.ceoPlan);
 
   await saveWorkflow(draft);
   return draft;
@@ -964,7 +972,7 @@ export async function runWorkflow(input: {
 
     const lastCeoStep = [...workflow.steps]
       .reverse()
-      .find((s) => s.agentKey === "ceo");
+      .find((s) => s.agentKey === "chief");
     workflow.finalResult =
       lastCeoStep?.output?.trim() ||
       workflow.steps[workflow.steps.length - 1]?.output?.trim() ||
@@ -972,7 +980,7 @@ export async function runWorkflow(input: {
     workflow.status = "completed";
     workflow.currentActivity = null;
     if (workflow.finalResult) {
-      pushMemory(workflow, "ceo", "final", "Final result", workflow.finalResult);
+      pushMemory(workflow, "chief", "final", "Final result", workflow.finalResult);
     }
     await pushAct("system", "done", `✅ Цепочка завершена! Финальный результат собран.`);
 
