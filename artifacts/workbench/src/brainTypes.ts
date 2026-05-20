@@ -127,6 +127,12 @@ export type WorkflowArtifactType =
   | "plain_url"
   | "instagram_profile_url"
   | "instagram_post_url"
+  | "instagram_carousel_analysis"
+  | "instagram_profile_snapshot"
+  | "extracted_source"
+  | "style_reference"
+  | "character_reference"
+  | "tool_warning"
   | "unknown";
 
 export type WorkflowArtifact = {
