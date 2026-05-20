@@ -113,6 +113,7 @@ export type AgentWorkflow = {
 export type CreateWorkflowPlanInput = {
   title: string;
   userRequest: string;
+  artifacts?: WorkflowArtifact[];
 };
 
 export type WorkflowOpenRouter = {
@@ -232,10 +233,26 @@ function isInstagramAccountAnalysisRequest(userRequest: string): boolean {
   );
 }
 
+function mergeWorkflowArtifacts(fromText: WorkflowArtifact[], prepared: WorkflowArtifact[]): WorkflowArtifact[] {
+  const out: WorkflowArtifact[] = [];
+  const seen = new Set<string>();
+  for (const artifact of [...fromText, ...prepared]) {
+    const key = `${artifact.type}:${artifact.sourceUrl ?? artifact.id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(artifact);
+  }
+  return out;
+}
+
 export function selectPrimaryAgent(userRequest: string, artifacts: WorkflowArtifact[] = []): WorkflowAgentKey {
   const q = userRequest.toLowerCase();
 
-  if (hasArtifactType(artifacts, "instagram_profile_url") || isInstagramAccountAnalysisRequest(userRequest)) {
+  if (
+    hasArtifactType(artifacts, "instagram_profile_url") ||
+    hasArtifactType(artifacts, "instagram_profile_snapshot") ||
+    isInstagramAccountAnalysisRequest(userRequest)
+  ) {
     return "analyst";
   }
 
@@ -243,7 +260,12 @@ export function selectPrimaryAgent(userRequest: string, artifacts: WorkflowArtif
   if (analysis.test(q)) return "analyst";
 
   const content = /контент|пост|карусел|reels|рилс|сторис|threads|telegram|тикток|tiktok|vk|ютуб|youtube|публикац|cta|хук|hook|слайд|caption|подпись/i;
-  if (content.test(q) || hasArtifactType(artifacts, "instagram_post_url")) return "content_maker";
+  if (
+    content.test(q) ||
+    hasArtifactType(artifacts, "instagram_post_url") ||
+    hasArtifactType(artifacts, "instagram_carousel_analysis") ||
+    hasArtifactType(artifacts, "extracted_source")
+  ) return "content_maker";
 
   const marketing = /оффер|продаж|воронк|заявк|лид|продукт|цен|подписк|оплат|конверс|клиент|лид-магнит|монетизац/i;
   if (marketing.test(q)) return "marketer";
@@ -395,7 +417,7 @@ export async function createWorkflowDraft(input: CreateWorkflowPlanInput): Promi
     userRequest: input.userRequest.trim(),
     ceoPlan: null,
     sharedContextSnapshot: null,
-    artifacts: [],
+    artifacts: input.artifacts ?? [],
     steps: [],
     memoryEvents: [],
     activityLog: [],
@@ -449,8 +471,9 @@ function pushMemory(workflow: AgentWorkflow, agentKey: WorkflowAgentKey, type: W
 
 function buildContentWorkflowSteps(artifacts: WorkflowArtifact[]): AgentWorkflowStep[] {
   const hasInstagramPost = hasArtifactType(artifacts, "instagram_post_url");
-  const sourceNote = hasInstagramPost
-    ? "Во входных артефактах есть Instagram post/reel URL. На этом проходе URL только классифицирован; если нет extracted slides/OCR в INPUT ARTIFACTS, не делай вид, что видел слайды. Попроси выполнить tool extraction в следующем проходе или работай только с подтверждёнными данными."
+  const hasExtracted = hasArtifactType(artifacts, "instagram_carousel_analysis") || hasArtifactType(artifacts, "extracted_source");
+  const sourceNote = hasInstagramPost && !hasExtracted
+    ? "Во входных артефактах есть Instagram post/reel URL, но нет extracted slides/OCR. Не делай вид, что видел слайды."
     : "Используй только подтверждённые данные из запроса и INPUT ARTIFACTS.";
 
   return [
@@ -470,7 +493,7 @@ function buildContentWorkflowSteps(artifacts: WorkflowArtifact[]): AgentWorkflow
       "content_maker",
       null,
       "Сценарий карусели",
-      "Сделай готовые тексты 7–10 слайдов. Запрещено писать скелет вида 'слайды 2–3: проблема'. Каждый слайд должен иметь финальный текст, который можно сразу ставить на изображение. Обязательный формат: Слайд 1: <текст>; Слайд 2: <текст>; ... Последний слайд должен содержать CTA из исходного запроса. Если для работы нужен текст из слайдов, но он не извлечён в INPUT ARTIFACTS, прямо напиши, что OCR/анализ слайдов не выполнен."
+      "Сделай готовые тексты 7–10 слайдов. Запрещено писать скелет вида 'слайды 2–3: проблема'. Каждый слайд должен иметь финальный текст, который можно сразу ставить на изображение. Обязательный формат: Слайд 1: <текст>; Слайд 2: <текст>; ... Последний слайд должен содержать CTA из исходного запроса. Если в INPUT ARTIFACTS есть OCR/транскрипт/исходные слайды, опирайся на них. Если для работы нужен текст из слайдов, но он не извлечён, прямо напиши, что OCR/анализ слайдов не выполнен."
     ),
     newStep(
       "copywriter",
@@ -493,7 +516,7 @@ function buildInstagramProfileAnalysisWorkflowSteps(): AgentWorkflowStep[] {
       "chief",
       null,
       "Поставить задачу анализа аккаунта",
-      "Во входных артефактах есть Instagram profile URL или запрос на анализ аккаунта. Зафиксируй, что это анализ профиля/аккаунта, а не задача сделать карусель. Укажи критерии анализа: позиционирование, контент, оффер, воронка, CTA, что не подтверждено без выгрузки постов."
+      "Во входных артефактах есть Instagram profile URL или snapshot аккаунта. Зафиксируй, что это анализ профиля/аккаунта, а не задача сделать карусель. Укажи критерии анализа: позиционирование, контент, оффер, воронка, CTA, что не подтверждено без выгрузки постов."
     ),
     newStep(
       "analyst",
@@ -544,7 +567,11 @@ function buildDefaultWorkflowSteps(): AgentWorkflowStep[] {
 
 function buildWorkflowSteps(userRequest: string, artifacts: WorkflowArtifact[]): AgentWorkflowStep[] {
   const primary = selectPrimaryAgent(userRequest, artifacts);
-  if (hasArtifactType(artifacts, "instagram_profile_url") || isInstagramAccountAnalysisRequest(userRequest)) {
+  if (
+    hasArtifactType(artifacts, "instagram_profile_url") ||
+    hasArtifactType(artifacts, "instagram_profile_snapshot") ||
+    isInstagramAccountAnalysisRequest(userRequest)
+  ) {
     return buildInstagramProfileAnalysisWorkflowSteps();
   }
 
@@ -565,6 +592,7 @@ function buildWorkflowSteps(userRequest: string, artifacts: WorkflowArtifact[]):
 export async function createWorkflowPlan(input: {
   title: string;
   userRequest: string;
+  artifacts?: WorkflowArtifact[];
   llm: WorkflowOpenRouter;
   ceoModel: string;
 }): Promise<AgentWorkflow> {
@@ -577,10 +605,12 @@ export async function createWorkflowPlan(input: {
   const brainLogEntries = await readBrainLog({ limit: 10 });
   const agents = await listAgents();
   const chiefAgent = await getAgentByKey("chief");
-  const artifacts = buildArtifactsFromUserRequest(userRequest);
+  const artifacts = mergeWorkflowArtifacts(
+    buildArtifactsFromUserRequest(userRequest),
+    Array.isArray(input.artifacts) ? input.artifacts : []
+  );
 
-  const draft = await createWorkflowDraft({ title, userRequest });
-  draft.artifacts = artifacts;
+  const draft = await createWorkflowDraft({ title, userRequest, artifacts });
 
   const preContext = buildSharedWorkflowContext({
     workflow: { ...draft, ceoPlan: "(pending)", steps: [] },
