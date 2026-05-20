@@ -117,12 +117,29 @@ export type WorkflowStepStatus =
 export type ReviewStatus = "not_started" | "passed" | "failed";
 
 export type WorkflowAgentKey =
-  | "ceo"
-  | "operations"
-  | "funnel"
-  | "content_strategy"
-  | "rewriter"
-  | "tech_architect";
+  | "chief"
+  | "marketer"
+  | "content_maker"
+  | "analyst"
+  | "copywriter";
+
+export type WorkflowArtifactType =
+  | "plain_url"
+  | "instagram_profile_url"
+  | "instagram_post_url"
+  | "unknown";
+
+export type WorkflowArtifact = {
+  id: string;
+  type: WorkflowArtifactType;
+  source: "user_request" | "manual" | "upload" | "tool";
+  sourceUrl?: string;
+  title: string;
+  summary: string;
+  textContent?: string;
+  structuredData?: Record<string, unknown>;
+  createdAt: string;
+};
 
 export type WorkflowMemoryEvent = {
   id: string;
@@ -177,6 +194,7 @@ export type AgentWorkflow = {
   userRequest: string;
   ceoPlan: string | null;
   sharedContextSnapshot: string | null;
+  artifacts: WorkflowArtifact[];
   steps: AgentWorkflowStep[];
   memoryEvents: WorkflowMemoryEvent[];
   activityLog: ActivityEntry[];
