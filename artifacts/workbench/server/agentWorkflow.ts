@@ -14,8 +14,7 @@ import {
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WORKFLOWS_DIR = path.resolve(__dirname, "..", "data", "brain", "workflows");
 
-const UUID_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export type WorkflowStatus =
   | "draft"
@@ -37,12 +36,11 @@ export type WorkflowStepStatus =
 export type ReviewStatus = "not_started" | "passed" | "failed";
 
 export type WorkflowAgentKey =
-  | "ceo"
-  | "operations"
-  | "funnel"
-  | "content_strategy"
-  | "rewriter"
-  | "tech_architect";
+  | "chief"
+  | "marketer"
+  | "content_maker"
+  | "analyst"
+  | "copywriter";
 
 export type WorkflowMemoryEvent = {
   id: string;
@@ -111,11 +109,7 @@ export type CreateWorkflowPlanInput = {
 };
 
 export type WorkflowOpenRouter = {
-  complete: (args: {
-    model: string;
-    system: string;
-    user: string;
-  }) => Promise<string>;
+  complete: (args: { model: string; system: string; user: string }) => Promise<string>;
 };
 
 export type WorkflowLiveEventType =
@@ -151,13 +145,13 @@ export type WorkflowOnEvent = (event: WorkflowLiveEvent) => void;
 const WORKFLOW_PROTOCOL = `
 
 WORKFLOW PROTOCOL:
-Ты участвуешь в многошаговой задаче. Ты видишь shared context: исходный запрос, план CEO, предыдущие outputs.
+Ты участвуешь в многошаговой задаче. Ты видишь shared context: исходный запрос, план Chief, предыдущие outputs.
 Делай только свою роль. Не повторяй то, что уже сделал другой шаг.
 
 ЗАПРЕЩЕНО КАТЕГОРИЧЕСКИ:
-- Упоминать других агентов по имени (не пиши "вызови агента funnel", "передай Operations", "обратись к Rewriter").
+- Упоминать других агентов по имени как команду системе.
 - Давать задачи типа "запустить агента X", "использовать систему Y", "открыть Agents Hub", "вызвать цепочку".
-- Писать задачи для системы — только конкретные действия для Егора лично: написать, опубликовать, снять, записать, созвониться.
+- Писать задачи для системы вместо результата для Егора.
 - Использовать Markdown-заголовки ## и жирный Markdown **.
 
 ФОРМАТ ОТВЕТА:
@@ -190,9 +184,7 @@ REQUIRED_FIX:
 
 function assertWorkflowId(id: string): string {
   const t = id.trim();
-  if (!UUID_RE.test(t)) {
-    throw new Error("Invalid workflow id");
-  }
+  if (!UUID_RE.test(t)) throw new Error("Invalid workflow id");
   return t;
 }
 
@@ -209,62 +201,50 @@ async function writeJsonAtomic(filePath: string, data: unknown): Promise<void> {
 
 function isWorkflowAgentKey(key: string): key is WorkflowAgentKey {
   return (
-    key === "ceo" ||
-    key === "operations" ||
-    key === "funnel" ||
-    key === "content_strategy" ||
-    key === "rewriter" ||
-    key === "tech_architect"
+    key === "chief" ||
+    key === "marketer" ||
+    key === "content_maker" ||
+    key === "analyst" ||
+    key === "copywriter"
   );
 }
 
 function toWorkflowAgentKey(key: string): WorkflowAgentKey {
-  if (!isWorkflowAgentKey(key)) {
-    throw new Error(`Unsupported workflow agent key: ${key}`);
-  }
+  if (!isWorkflowAgentKey(key)) throw new Error(`Unsupported workflow agent key: ${key}`);
   return key;
 }
 
 export function selectPrimaryAgent(userRequest: string): WorkflowAgentKey {
   const q = userRequest.toLowerCase();
 
-  const tech =
-    /сайт|код|cursor|баг|репозитор|github|git|css|frontend|backend|api|typescript|javascript|react|vite|deploy|инфраструктур|деплой|хостинг|docker|nginx|sql|база данных|endpoint|роут|middleware/i;
-  if (tech.test(q)) return "tech_architect";
+  const content = /контент|пост|карусел|reels|рилс|сторис|threads|telegram|тикток|tiktok|vk|ютуб|youtube|публикац|cta|хук|hook|слайд|caption|подпись/i;
+  if (content.test(q)) return "content_maker";
 
-  const funnel =
-    /оффер|продаж|воронк|заявк|лид|продукт|цен|подписк|оплат|конверс|cta|клиент/i;
-  if (funnel.test(q)) return "funnel";
+  const marketing = /оффер|продаж|воронк|заявк|лид|продукт|цен|подписк|оплат|конверс|клиент|лид-магнит|монетизац/i;
+  if (marketing.test(q)) return "marketer";
 
-  const content =
-    /контент|пост|карусел|reels|рилс|сторис|threads|telegram|тикток|tiktok|vk|ютуб|youtube|rubrics|рубрик|публикац/i;
-  if (content.test(q)) return "content_strategy";
+  const analysis = /анализ|разбор|конкурент|рынок|тренд|механик|гипотез|данн|метрик|исслед/i;
+  if (analysis.test(q)) return "analyst";
 
-  const rewrite =
-    /перепиши|текст|стиль|живее|рерайт|формулировк|заголовок|hook|хук/i;
-  if (rewrite.test(q)) return "rewriter";
+  const copy = /перепиши|текст|стиль|живее|рерайт|формулировк|заголовок|копирайт|редактур/i;
+  if (copy.test(q)) return "copywriter";
 
-  return "operations";
+  return "chief";
 }
 
-export function selectReviewerForStep(
-  stepAgentKey: WorkflowAgentKey
-): WorkflowAgentKey {
+export function selectReviewerForStep(stepAgentKey: WorkflowAgentKey): WorkflowAgentKey {
   switch (stepAgentKey) {
-    case "tech_architect":
-      return "ceo";
-    case "content_strategy":
-      return "rewriter";
-    case "rewriter":
-      return "content_strategy";
-    case "funnel":
-      return "ceo";
-    case "operations":
-      return "ceo";
-    case "ceo":
-      return "operations";
+    case "marketer":
+      return "chief";
+    case "content_maker":
+      return "copywriter";
+    case "copywriter":
+      return "chief";
+    case "analyst":
+      return "chief";
+    case "chief":
     default:
-      return "ceo";
+      return "marketer";
   }
 }
 
@@ -277,8 +257,7 @@ export function parseReviewStatus(text: string): ReviewStatus {
 function summarizeOutput(text: string | null, max = 400): string {
   if (!text) return "—";
   const t = text.trim();
-  if (t.length <= max) return t;
-  return `${t.slice(0, max)}…`;
+  return t.length <= max ? t : `${t.slice(0, max)}…`;
 }
 
 export function buildSharedWorkflowContext(input: {
@@ -296,19 +275,14 @@ export function buildSharedWorkflowContext(input: {
   lines.push("", "=== ORIGINAL USER REQUEST ===");
   lines.push(workflow.userRequest || "not set");
 
-  lines.push("", "=== CEO PLAN ===");
+  lines.push("", "=== CHIEF PLAN ===");
   lines.push(workflow.ceoPlan?.trim() || "not set");
 
   lines.push("", "=== WORKFLOW STEPS ===");
   for (const s of workflow.steps) {
-    lines.push(
-      `- [${s.status}] ${s.agentKey} :: ${s.title} | review: ${s.reviewStatus}${
-        s.reviewerKey ? ` (reviewer: ${s.reviewerKey})` : ""
-      }`
-    );
+    lines.push(`- [${s.status}] ${s.agentKey} :: ${s.title} | review: ${s.reviewStatus}${s.reviewerKey ? ` (reviewer: ${s.reviewerKey})` : ""}`);
     if (s.output) lines.push(`  output: ${summarizeOutput(s.output)}`);
-    if (s.reviewOutput)
-      lines.push(`  review: ${summarizeOutput(s.reviewOutput, 300)}`);
+    if (s.reviewOutput) lines.push(`  review: ${summarizeOutput(s.reviewOutput, 300)}`);
   }
 
   lines.push("", "=== WORKFLOW MEMORY (recent) ===");
@@ -326,16 +300,12 @@ export function buildSharedWorkflowContext(input: {
   if (log.length === 0) lines.push("(none)");
   else {
     for (const e of log) {
-      lines.push(
-        `- [${e.entryType}] ${e.agentKey} ${e.ts}: ${e.title} — ${summarizeOutput(e.body, 200)}`
-      );
+      lines.push(`- [${e.entryType}] ${e.agentKey} ${e.ts}: ${e.title} — ${summarizeOutput(e.body, 200)}`);
     }
   }
 
   lines.push("", "=== AGENTS (keys / roles) ===");
-  for (const a of agents) {
-    lines.push(`- ${a.key}: ${a.role}`);
-  }
+  for (const a of agents) lines.push(`- ${a.key}: ${a.role}`);
 
   return lines.join("\n");
 }
@@ -352,12 +322,12 @@ export async function saveWorkflow(workflow: AgentWorkflow): Promise<void> {
 export async function readWorkflow(workflowId: string): Promise<AgentWorkflow> {
   try {
     const raw = await fs.readFile(workflowPath(workflowId), "utf-8");
-    return JSON.parse(raw) as AgentWorkflow;
+    const workflow = JSON.parse(raw) as AgentWorkflow;
+    workflow.steps = (workflow.steps ?? []).filter((step) => isWorkflowAgentKey(step.agentKey));
+    return workflow;
   } catch (e) {
     const err = e as NodeJS.ErrnoException;
-    if (err.code === "ENOENT") {
-      throw new Error("Workflow not found");
-    }
+    if (err.code === "ENOENT") throw new Error("Workflow not found");
     throw e;
   }
 }
@@ -388,13 +358,10 @@ export async function listWorkflows(limit = 20): Promise<AgentWorkflow[]> {
   return items.slice(0, limit).map((x) => x.wf);
 }
 
-export async function createWorkflowDraft(
-  input: CreateWorkflowPlanInput
-): Promise<AgentWorkflow> {
+export async function createWorkflowDraft(input: CreateWorkflowPlanInput): Promise<AgentWorkflow> {
   const now = new Date().toISOString();
-  const id = crypto.randomUUID();
   return {
-    id,
+    id: crypto.randomUUID(),
     createdAt: now,
     updatedAt: now,
     status: "draft",
@@ -412,12 +379,11 @@ export async function createWorkflowDraft(
 }
 
 const AGENT_DISPLAY_NAMES: Record<string, string> = {
-  ceo: "CEO",
-  operations: "Operations",
-  funnel: "Funnel",
-  content_strategy: "Контент",
-  rewriter: "Rewriter",
-  tech_architect: "Tech Arch",
+  chief: "Chief",
+  marketer: "Marketer",
+  content_maker: "Content Maker",
+  analyst: "Analyst",
+  copywriter: "Copywriter",
   system: "Система",
 };
 
@@ -425,12 +391,7 @@ function agentDisplayName(key: string): string {
   return AGENT_DISPLAY_NAMES[key] ?? key;
 }
 
-function newStep(
-  agentKey: WorkflowAgentKey,
-  reviewerKey: WorkflowAgentKey | null,
-  title: string,
-  instruction: string
-): AgentWorkflowStep {
+function newStep(agentKey: WorkflowAgentKey, reviewerKey: WorkflowAgentKey | null, title: string, instruction: string): AgentWorkflowStep {
   return {
     id: crypto.randomUUID(),
     agentKey,
@@ -448,13 +409,7 @@ function newStep(
   };
 }
 
-function pushMemory(
-  workflow: AgentWorkflow,
-  agentKey: WorkflowAgentKey,
-  type: WorkflowMemoryEvent["type"],
-  title: string,
-  body: string
-) {
+function pushMemory(workflow: AgentWorkflow, agentKey: WorkflowAgentKey, type: WorkflowMemoryEvent["type"], title: string, body: string) {
   workflow.memoryEvents.push({
     id: crypto.randomUUID(),
     ts: new Date().toISOString(),
@@ -465,122 +420,80 @@ function pushMemory(
   });
 }
 
+function buildContentWorkflowSteps(): AgentWorkflowStep[] {
+  return [
+    newStep(
+      "chief",
+      null,
+      "Поставить задачу и критерий готовности",
+      "Определи формат, аудиторию, цель карусели, CTA и критерий готового результата. Не пиши финальный контент. Дай жёсткую рамку для следующих шагов."
+    ),
+    newStep(
+      "marketer",
+      null,
+      "Маркетинговая упаковка",
+      "Упакуй тему через боль, выгоду, интерес и действие. Дай один главный угол подачи, один CTA и что человек должен почувствовать после первого слайда. Не пиши абстрактную стратегию."
+    ),
+    newStep(
+      "content_maker",
+      null,
+      "Сценарий карусели",
+      "Сделай готовые тексты 7–10 слайдов. Запрещено писать скелет вида 'слайды 2–3: проблема'. Каждый слайд должен иметь финальный текст, который можно сразу ставить на изображение. Обязательный формат: Слайд 1: <текст>; Слайд 2: <текст>; ... Последний слайд должен содержать CTA из исходного запроса."
+    ),
+    newStep(
+      "copywriter",
+      null,
+      "Финальная редактура",
+      "Отредактируй готовые тексты слайдов: усили хук, убери GPT-тон, сократи длинное, сделай живо и конкретно. Сохрани 7–10 готовых слайдов. Не превращай в план."
+    ),
+    newStep(
+      "chief",
+      null,
+      "Финальная сборка",
+      "Собери финальный результат: готовая карусель по слайдам, caption, CTA, короткая инструкция что публиковать. Не скрывай, если какие-то данные не подтверждены."
+    ),
+  ];
+}
+
+function buildMarketingWorkflowSteps(): AgentWorkflowStep[] {
+  return [
+    newStep("chief", null, "Поставить задачу и критерий готовности", "Определи цель, аудиторию, продукт, ограничение и критерий готовности."),
+    newStep("marketer", null, "Маркетинговая упаковка", "Дай оффер, боль, выгоду, CTA, путь от внимания до заявки. Только конкретные формулировки."),
+    newStep("copywriter", null, "Финальная редактура", "Собери живые формулировки без GPT-тона. Дай финальный текст/оффер/CTA."),
+    newStep("chief", null, "Финальная сборка", "Собери финальный результат и одно следующее действие для Егора."),
+  ];
+}
+
+function buildAnalysisWorkflowSteps(): AgentWorkflowStep[] {
+  return [
+    newStep("chief", null, "Поставить задачу и критерий готовности", "Определи что именно нужно проверить, какие данные нужны и где нельзя выдумывать."),
+    newStep("analyst", null, "Анализ механики", "Разбери механику, гипотезы, риски и что можно адаптировать под Егора. Не придумывай неподтверждённые данные."),
+    newStep("marketer", null, "Практическая адаптация", "Переведи выводы аналитика в оффер/контентный угол/CTA."),
+    newStep("chief", null, "Финальная сборка", "Собери выводы и одно следующее действие."),
+  ];
+}
+
+function buildDefaultWorkflowSteps(): AgentWorkflowStep[] {
+  return [
+    newStep("chief", null, "Поставить задачу и критерий готовности", "Сформулируй цель, ограничения, что делаем сейчас и что не делаем."),
+    newStep("analyst", null, "Проверить логику и риски", "Проверь задачу на риски, пробелы, неподтверждённые факты и слабые места."),
+    newStep("chief", null, "Финальная сборка", "Собери финальное решение и одно следующее действие."),
+  ];
+}
+
 function buildWorkflowSteps(userRequest: string): AgentWorkflowStep[] {
   const primary = selectPrimaryAgent(userRequest);
-
   switch (primary) {
-    case "tech_architect":
-      return [
-        newStep(
-          "ceo",
-          "operations",
-          "Уточнить цель и критерий готово",
-          "Сформулируй цель задачи, критерии успеха, ограничения. Пиши для Егора — что нужно получить на выходе, по каким критериям оценить результат, что запрещено менять."
-        ),
-        newStep(
-          "operations",
-          "ceo",
-          "Разбить задачу на конкретные шаги для Егора",
-          "Составь список конкретных действий для Егора: что открыть, что найти, что изменить, что проверить. Только реальные действия — не упоминай агентов, системы, инструменты. Максимум 5 шагов в формате: СЕГОДНЯ / ПОРЯДОК / ЧТО НЕ ДЕЛАТЬ."
-        ),
-        newStep(
-          "tech_architect",
-          "ceo",
-          "Техническая реализация и риски",
-          "Укажи: owner-файл, что именно изменить (найти / заменить / удалить), как доказать через grep/diff, какие соседние файлы не трогать, какие риски."
-        ),
-        newStep(
-          "ceo",
-          null,
-          "Финальный результат для Егора",
-          "Собери финальный ответ: конкретное решение, порядок действий, что принято, что спорно, next action. Не скрывай конфликты между шагами."
-        ),
-      ];
-
-    case "funnel":
-      return [
-        newStep(
-          "ceo",
-          "operations",
-          "Уточнить цель и критерий готово",
-          "Сформулируй цель задачи. Что конкретно нужно: оффер, лид-магнит, путь продажи? По каким критериям оценить результат?"
-        ),
-        newStep(
-          "funnel",
-          "ceo",
-          "Воронка, оффер и путь к продаже",
-          "Посмотри на задачу через продажи. Дай: конкретный оффер (формулировка выгоды), путь от внимания до заявки, CTA, лид-магнит если нужен. Никаких абстракций — только конкретные формулировки."
-        ),
-        newStep(
-          "content_strategy",
-          "rewriter",
-          "Контентная подача",
-          "Как это подать аудитории? Дай хук, структуру поста/карусели/сторис, платформу, формат. Один конкретный контент для этой задачи."
-        ),
-        newStep(
-          "rewriter",
-          "content_strategy",
-          "Финальный текст в стиле Егора",
-          "Перепиши ключевые формулировки. Живо, коротко, без GPT-тона. Дай 2-3 варианта хука."
-        ),
-        newStep(
-          "ceo",
-          null,
-          "Финальный результат для Егора",
-          "Собери финальный ответ: готовый оффер + текст + порядок действий + next action."
-        ),
-      ];
-
-    case "content_strategy":
-    case "rewriter":
-      return [
-        newStep(
-          "ceo",
-          "operations",
-          "Уточнить цель и критерий готово",
-          "Сформулируй цель задачи. Что конкретно нужно: пост, карусель, reels, сторис? Для какой платформы? Какой CTA? Какая аудитория?"
-        ),
-        newStep(
-          "content_strategy",
-          "rewriter",
-          "Контентная подача",
-          "Дай хук, структуру, формат. Для карусели — скелет слайдов. Для поста — структура. Для reels — сценарий 30-60 сек. Конкретно, без стратегических рассуждений."
-        ),
-        newStep(
-          "rewriter",
-          "content_strategy",
-          "Финальный текст в стиле Егора",
-          "Перепиши в живой стиль Егора. Убери GPT-тон, канцелярит. Дай финальный текст готовый к публикации."
-        ),
-        newStep(
-          "ceo",
-          null,
-          "Финальный результат для Егора",
-          "Выдай готовый контент + подпись + CTA + следующий шаг."
-        ),
-      ];
-
-    default: // operations — ежедневные задачи, планирование, дисциплина
-      return [
-        newStep(
-          "ceo",
-          "operations",
-          "Уточнить цель и критерий готово",
-          "Сформулируй цель задачи, критерии успеха, ограничения."
-        ),
-        newStep(
-          "operations",
-          "ceo",
-          "Разбить задачу на конкретные шаги для Егора",
-          "Составь список конкретных действий для Егора. Только реальные действия — не упоминай агентов, инструменты или системы. Максимум 3-5 шагов в формате: СЕГОДНЯ / ПОРЯДОК / ЧТО НЕ ДЕЛАТЬ / ОТЧЁТ."
-        ),
-        newStep(
-          "ceo",
-          null,
-          "Финальный результат для Егора",
-          "Собери финальный ответ: решение, порядок действий, next action."
-        ),
-      ];
+    case "content_maker":
+    case "copywriter":
+      return buildContentWorkflowSteps();
+    case "marketer":
+      return buildMarketingWorkflowSteps();
+    case "analyst":
+      return buildAnalysisWorkflowSteps();
+    case "chief":
+    default:
+      return buildDefaultWorkflowSteps();
   }
 }
 
@@ -598,56 +511,31 @@ export async function createWorkflowPlan(input: {
   const brainState = await readBrainState();
   const brainLogEntries = await readBrainLog({ limit: 10 });
   const agents = await listAgents();
-  const ceoAgent = await getAgentByKey("ceo");
+  const chiefAgent = await getAgentByKey("chief");
 
   const draft = await createWorkflowDraft({ title, userRequest });
 
   const preContext = buildSharedWorkflowContext({
-    workflow: {
-      ...draft,
-      ceoPlan: "(pending)",
-      steps: [],
-    },
+    workflow: { ...draft, ceoPlan: "(pending)", steps: [] },
     brainState,
     brainLogEntries,
     agents,
   });
 
-  const ceoUser = `Заголовок задачи: ${title}
+  const chiefUser = `Заголовок задачи: ${title}\n\nЗапрос Егора:\n${userRequest}\n\nСформируй чёткий план: цель, критерии готовности, риски, порядок шагов для команды агентов. Пиши по-русски.`;
+  const chiefSystem = chiefAgent.systemPrompt + WORKFLOW_PROTOCOL + "\n\n--- SHARED CONTEXT ---\n" + preContext;
 
-Запрос Егора:
-${userRequest}
+  const chiefPlan = await input.llm.complete({ model: input.ceoModel, system: chiefSystem, user: chiefUser });
 
-Сформируй чёткий план: цель, критерии готовности, риски, порядок шагов для команды агентов. Пиши по-русски.`;
-
-  const ceoSystem =
-    ceoAgent.systemPrompt +
-    WORKFLOW_PROTOCOL +
-    "\n\n--- SHARED CONTEXT ---\n" +
-    preContext;
-
-  const ceoPlan = await input.llm.complete({
-    model: input.ceoModel,
-    system: ceoSystem,
-    user: ceoUser,
-  });
-
-  draft.ceoPlan = ceoPlan.trim();
+  draft.ceoPlan = chiefPlan.trim();
   draft.sharedContextSnapshot = summarizeOutput(
-    buildSharedWorkflowContext({
-      workflow: { ...draft, steps: [] },
-      brainState,
-      brainLogEntries,
-      agents,
-    }),
+    buildSharedWorkflowContext({ workflow: { ...draft, steps: [] }, brainState, brainLogEntries, agents }),
     8000
   );
-
   draft.steps = buildWorkflowSteps(userRequest);
-
   draft.status = "planned";
   draft.memoryEvents = [];
-  pushMemory(draft, "ceo", "plan", "CEO plan", draft.ceoPlan);
+  pushMemory(draft, "chief", "plan", "Chief plan", draft.ceoPlan);
 
   await saveWorkflow(draft);
   return draft;
@@ -660,17 +548,8 @@ async function runAgentStep(args: {
   userBlock: string;
   llm: WorkflowOpenRouter;
 }): Promise<string> {
-  const system =
-    args.agent.systemPrompt +
-    WORKFLOW_PROTOCOL +
-    "\n\n--- SHARED CONTEXT ---\n" +
-    args.sharedContext;
-
-  return args.llm.complete({
-    model: args.model,
-    system,
-    user: args.userBlock,
-  });
+  const system = args.agent.systemPrompt + WORKFLOW_PROTOCOL + "\n\n--- SHARED CONTEXT ---\n" + args.sharedContext;
+  return args.llm.complete({ model: args.model, system, user: args.userBlock });
 }
 
 async function runReviewer(args: {
@@ -680,33 +559,16 @@ async function runReviewer(args: {
   outputToReview: string;
   llm: WorkflowOpenRouter;
 }): Promise<string> {
-  const system =
-    args.reviewer.systemPrompt +
-    REVIEW_PROTOCOL +
-    "\n\n--- SHARED CONTEXT ---\n" +
-    args.sharedContext;
-
+  const system = args.reviewer.systemPrompt + REVIEW_PROTOCOL + "\n\n--- SHARED CONTEXT ---\n" + args.sharedContext;
   const user = `Проверь следующий output агента:\n\n---\n${args.outputToReview}\n---`;
-
-  return args.llm.complete({
-    model: args.model,
-    system,
-    user,
-  });
+  return args.llm.complete({ model: args.model, system, user });
 }
 
-export async function runWorkflow(input: {
-  workflowId: string;
-  llm: WorkflowOpenRouter;
-}): Promise<AgentWorkflow> {
-  if (!process.env.OPENROUTER_API_KEY?.trim()) {
-    throw new Error("Missing required env: OPENROUTER_API_KEY");
-  }
+export async function runWorkflow(input: { workflowId: string; llm: WorkflowOpenRouter }): Promise<AgentWorkflow> {
+  if (!process.env.OPENROUTER_API_KEY?.trim()) throw new Error("Missing required env: OPENROUTER_API_KEY");
 
   const workflow = await readWorkflow(input.workflowId);
-  if (workflow.status === "completed") {
-    throw new Error("Workflow already completed");
-  }
+  if (workflow.status === "completed") throw new Error("Workflow already completed");
 
   const brainState = await readBrainState();
   const brainLogEntries = await readBrainLog({ limit: 10 });
@@ -717,30 +579,21 @@ export async function runWorkflow(input: {
   workflow.status = "running";
   workflow.error = null;
   workflow.finalResult = null;
-  for (const s of workflow.steps) {
-    s.status = "pending";
-    s.output = null;
-    s.reviewOutput = null;
-    s.reviewStatus = "not_started";
-    s.revisionCount = 0;
-    s.error = null;
-    s.startedAt = null;
-    s.completedAt = null;
-  }
+  workflow.steps = workflow.steps.map((s) => ({
+    ...s,
+    status: "pending",
+    output: null,
+    reviewOutput: null,
+    reviewStatus: "not_started",
+    revisionCount: 0,
+    error: null,
+    startedAt: null,
+    completedAt: null,
+  }));
   await saveWorkflow(workflow);
 
-  const pushAct = async (
-    agentKey: string,
-    phase: ActivityPhase,
-    text: string
-  ) => {
-    workflow.activityLog.push({
-      id: crypto.randomUUID(),
-      ts: new Date().toISOString(),
-      agentKey,
-      phase,
-      text,
-    });
+  const pushAct = async (agentKey: string, phase: ActivityPhase, text: string) => {
+    workflow.activityLog.push({ id: crypto.randomUUID(), ts: new Date().toISOString(), agentKey, phase, text });
     await saveWorkflow(workflow);
   };
 
@@ -754,14 +607,12 @@ export async function runWorkflow(input: {
     return m;
   };
 
-  const llmWithModel = {
-    complete: (args: { model: string; system: string; user: string }) =>
-      input.llm.complete(args),
-  };
+  const llmWithModel = { complete: (args: { model: string; system: string; user: string }) => input.llm.complete(args) };
 
   try {
     for (let stepIdx = 0; stepIdx < workflow.steps.length; stepIdx++) {
       const step = workflow.steps[stepIdx];
+      step.agentKey = toWorkflowAgentKey(step.agentKey);
       const agentLabel = agentDisplayName(step.agentKey);
 
       step.status = "running";
@@ -774,23 +625,13 @@ export async function runWorkflow(input: {
 
       workflow.currentActivity = `${agentLabel} читает задачу…`;
       await saveWorkflow(workflow);
-
-      await pushAct(
-        step.agentKey,
-        "reading",
-        `${agentLabel} получает задачу [${stepIdx + 1}/${workflow.steps.length}]: «${step.title}»`
-      );
+      await pushAct(step.agentKey, "reading", `${agentLabel} получает задачу [${stepIdx + 1}/${workflow.steps.length}]: «${step.title}»`);
 
       const agent = await getAgentByKey(step.agentKey);
       const model = resolveModel(step.agentKey);
 
       const runOneAgent = async (extra?: string) => {
-        const shared = buildSharedWorkflowContext({
-          workflow,
-          brainState,
-          brainLogEntries,
-          agents,
-        });
+        const shared = buildSharedWorkflowContext({ workflow, brainState, brainLogEntries, agents });
         const userBlock =
           `Шаг: ${step.title}\n\nИнструкция шага:\n${step.instruction}\n\n` +
           (extra ? `Дополнительно:\n${extra}\n\n` : "") +
@@ -798,23 +639,11 @@ export async function runWorkflow(input: {
 
         workflow.currentActivity = `${agentLabel} думает и пишет ответ…`;
         await saveWorkflow(workflow);
-        await pushAct(
-          step.agentKey,
-          "thinking",
-          `${agentLabel} анализирует задачу и пишет ответ…`
-        );
-
-        return runAgentStep({
-          agent,
-          model,
-          sharedContext: shared,
-          userBlock,
-          llm: llmWithModel,
-        });
+        await pushAct(step.agentKey, "thinking", `${agentLabel} анализирует задачу и пишет ответ…`);
+        return runAgentStep({ agent, model, sharedContext: shared, userBlock, llm: llmWithModel });
       };
 
       let output = await runOneAgent();
-
       step.output = output.trim();
       workflow.currentActivity = null;
       pushMemory(workflow, step.agentKey, "output", step.title, step.output);
@@ -822,116 +651,55 @@ export async function runWorkflow(input: {
 
       const runReview = async (candidateOutput: string) => {
         if (!step.reviewerKey) return "passed" as ReviewStatus;
-
+        step.reviewerKey = toWorkflowAgentKey(step.reviewerKey);
         const reviewerLabel = agentDisplayName(step.reviewerKey);
-
         step.status = "reviewing";
-        await pushAct(
-          step.agentKey,
-          "sending",
-          `${agentLabel} → ${reviewerLabel}: отправляю работу на проверку`
-        );
+        await pushAct(step.agentKey, "sending", `${agentLabel} → ${reviewerLabel}: отправляю работу на проверку`);
 
         workflow.currentActivity = `${reviewerLabel} читает работу ${agentLabel}…`;
         await saveWorkflow(workflow);
-        await pushAct(
-          step.reviewerKey,
-          "reading",
-          `${reviewerLabel} читает результат от ${agentLabel}…`
-        );
+        await pushAct(step.reviewerKey, "reading", `${reviewerLabel} читает результат от ${agentLabel}…`);
 
         const reviewer = await getAgentByKey(step.reviewerKey);
         const revModel = resolveModel(step.reviewerKey);
-        const shared = buildSharedWorkflowContext({
-          workflow,
-          brainState,
-          brainLogEntries,
-          agents,
-        });
+        const shared = buildSharedWorkflowContext({ workflow, brainState, brainLogEntries, agents });
 
         workflow.currentActivity = `${reviewerLabel} оценивает качество работы…`;
         await saveWorkflow(workflow);
-        await pushAct(
-          step.reviewerKey,
-          "thinking",
-          `${reviewerLabel} проверяет качество работы ${agentLabel}…`
-        );
+        await pushAct(step.reviewerKey, "thinking", `${reviewerLabel} проверяет качество работы ${agentLabel}…`);
 
-        const reviewText = await runReviewer({
-          reviewer,
-          model: revModel,
-          sharedContext: shared,
-          outputToReview: candidateOutput,
-          llm: llmWithModel,
-        });
-
+        const reviewText = await runReviewer({ reviewer, model: revModel, sharedContext: shared, outputToReview: candidateOutput, llm: llmWithModel });
         step.reviewOutput = reviewText.trim();
         const rs = parseReviewStatus(reviewText);
         step.reviewStatus = rs;
         workflow.currentActivity = null;
-
-        pushMemory(
-          workflow,
-          step.reviewerKey,
-          "review",
-          `Review for step ${step.title}`,
-          step.reviewOutput
-        );
-
+        pushMemory(workflow, step.reviewerKey, "review", `Review for step ${step.title}`, step.reviewOutput);
         const verdict = rs === "passed" ? "✅ Принято" : "❌ Нужно переделать";
-        await pushAct(
-          step.reviewerKey,
-          "review",
-          `${step.reviewOutput}\n\n────\n${verdict}`
-        );
-
+        await pushAct(step.reviewerKey, "review", `${step.reviewOutput}\n\n────\n${verdict}`);
         return rs;
       };
 
       let reviewResult: ReviewStatus = "passed";
-      if (step.reviewerKey) {
-        reviewResult = await runReview(step.output);
-      } else {
-        step.reviewStatus = "not_started";
-      }
+      if (step.reviewerKey) reviewResult = await runReview(step.output);
+      else step.reviewStatus = "not_started";
 
       if (step.reviewerKey && reviewResult === "failed") {
         step.status = "revision_required";
-
         if (step.revisionCount < 1) {
           step.revisionCount += 1;
           const reviewOut = step.reviewOutput ?? "";
-          const fix =
-            reviewOut.match(/REQUIRED_FIX:\s*([\s\S]*)/i)?.[1]?.trim() ||
-            "Усиль результат по замечаниям ревьюера.";
+          const fix = reviewOut.match(/REQUIRED_FIX:\s*([\s\S]*)/i)?.[1]?.trim() || "Усиль результат по замечаниям ревьюера.";
           pushMemory(workflow, step.agentKey, "revision", "Revision requested", fix);
-
-          await pushAct(
-            step.agentKey,
-            "revision",
-            `${agentLabel} получил замечания и переделывает…\n\nЧто исправить:\n${fix}`
-          );
+          await pushAct(step.agentKey, "revision", `${agentLabel} получил замечания и переделывает…\n\nЧто исправить:\n${fix}`);
 
           workflow.currentActivity = `${agentLabel} исправляет работу…`;
           await saveWorkflow(workflow);
-          await pushAct(
-            step.agentKey,
-            "thinking",
-            `${agentLabel} переписывает с учётом замечаний…`
-          );
+          await pushAct(step.agentKey, "thinking", `${agentLabel} переписывает с учётом замечаний…`);
 
-          output = await runOneAgent(
-            `Ревью не прошло. Исправь и улучши output. Замечания:\n${reviewOut}\n\nТребуемое исправление:\n${fix}`
-          );
+          output = await runOneAgent(`Ревью не прошло. Исправь и улучши output. Замечания:\n${reviewOut}\n\nТребуемое исправление:\n${fix}`);
           step.output = output.trim();
           workflow.currentActivity = null;
-          pushMemory(
-            workflow,
-            step.agentKey,
-            "output",
-            `${step.title} (revision)`,
-            step.output
-          );
+          pushMemory(workflow, step.agentKey, "output", `${step.title} (revision)`, step.output);
           await pushAct(step.agentKey, "output", step.output);
 
           const second = await runReview(step.output);
@@ -939,7 +707,7 @@ export async function runWorkflow(input: {
             workflow.status = "failed";
             workflow.error = step.reviewOutput || "Review failed after revision";
             workflow.currentActivity = null;
-            await pushAct("system", "error", `❌ Цепочка остановлена: ревью не прошло дважды`);
+            await pushAct("system", "error", "❌ Цепочка остановлена: ревью не прошло дважды");
             await saveWorkflow(workflow);
             return workflow;
           }
@@ -947,7 +715,7 @@ export async function runWorkflow(input: {
           workflow.status = "failed";
           workflow.error = step.reviewOutput || "Review failed";
           workflow.currentActivity = null;
-          await pushAct("system", "error", `❌ Цепочка остановлена: ревью провалено`);
+          await pushAct("system", "error", "❌ Цепочка остановлена: ревью провалено");
           await saveWorkflow(workflow);
           return workflow;
         }
@@ -955,44 +723,29 @@ export async function runWorkflow(input: {
 
       step.status = "completed";
       step.completedAt = new Date().toISOString();
-      await pushAct(
-        step.agentKey,
-        "done",
-        `✓ ${agentLabel} завершил шаг «${step.title}»`
-      );
+      await pushAct(step.agentKey, "done", `✓ ${agentLabel} завершил шаг «${step.title}»`);
     }
 
-    const lastCeoStep = [...workflow.steps]
-      .reverse()
-      .find((s) => s.agentKey === "ceo");
-    workflow.finalResult =
-      lastCeoStep?.output?.trim() ||
-      workflow.steps[workflow.steps.length - 1]?.output?.trim() ||
-      null;
+    const lastChiefStep = [...workflow.steps].reverse().find((s) => s.agentKey === "chief");
+    workflow.finalResult = lastChiefStep?.output?.trim() || workflow.steps[workflow.steps.length - 1]?.output?.trim() || null;
     workflow.status = "completed";
     workflow.currentActivity = null;
-    if (workflow.finalResult) {
-      pushMemory(workflow, "ceo", "final", "Final result", workflow.finalResult);
-    }
-    await pushAct("system", "done", `✅ Цепочка завершена! Финальный результат собран.`);
-
+    if (workflow.finalResult) pushMemory(workflow, "chief", "final", "Final result", workflow.finalResult);
+    await pushAct("system", "done", "✅ Цепочка завершена! Финальный результат собран.");
+    await saveWorkflow(workflow);
     return workflow;
   } catch (e) {
     workflow.status = "failed";
     workflow.error = e instanceof Error ? e.message : String(e);
     workflow.currentActivity = null;
     await pushAct("system", "error", `❌ Ошибка: ${workflow.error}`);
+    await saveWorkflow(workflow);
     throw e;
   }
 }
 
-export function startWorkflowBackground(input: {
-  workflowId: string;
-  llm: WorkflowOpenRouter;
-}): void {
-  void runWorkflow({ workflowId: input.workflowId, llm: input.llm }).catch(
-    (e: unknown) => {
-      console.error("[workflow-bg] unhandled error:", e instanceof Error ? e.message : e);
-    }
-  );
+export function startWorkflowBackground(input: { workflowId: string; llm: WorkflowOpenRouter }): void {
+  void runWorkflow({ workflowId: input.workflowId, llm: input.llm }).catch((e: unknown) => {
+    console.error("[workflow-bg] unhandled error:", e instanceof Error ? e.message : e);
+  });
 }
