@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { Loader2 } from "lucide-react";
+import { ClipboardCopy, Download, Loader2 } from "lucide-react";
 import type {
   ExtractedSource,
   ExtractedVisualDescription,
@@ -26,13 +26,10 @@ export type {
 } from "./sourceRewriterTypes";
 
 const REWRITE_MODE_OPTIONS: { value: RewriteMode; label: string }[] = [
-  {
-    value: "preserve_original_structure",
-    label: "Сохранить исходную структуру",
-  },
+  { value: "carousel_script", label: "Преобразовать в сценарий карусели" },
+  { value: "preserve_original_structure", label: "Сохранить исходную структуру" },
   { value: "storytelling_text", label: "Преобразовать в сторителлинг" },
   { value: "presentation_text", label: "Преобразовать в текст презентации" },
-  { value: "carousel_script", label: "Преобразовать в сценарий карусели" },
   { value: "lesson_material", label: "Преобразовать в урок / учебный материал" },
   { value: "clean_article", label: "Преобразовать в статью" },
   { value: "sales_page_text", label: "Преобразовать в продающий текст" },
@@ -67,14 +64,28 @@ const FILE_ACCEPT =
   ".mp4,.mov,.mp3,.wav,.pdf,.pptx,.txt,.md,.docx,.png,.jpg,.jpeg,.webp";
 
 const defaultSettings: RewriteSettings = {
-  rewriteMode: "preserve_original_structure",
+  rewriteMode: "carousel_script",
   outputLength: "keep_similar_length",
-  styleIntensity: "normal_rewrite",
+  styleIntensity: "strong_rewrite",
   plagiarismSafety: "strong_uniqueness",
+  carouselSlideCount: 6,
+  carouselMaxCharsPerSlide: 140,
+  carouselStyleNotes: "",
+  carouselCtaText: "Сохрани этот пост и отправь тому, кому это пригодится.",
 };
 
 function fieldClass(readonly = false) {
   return `mt-1 w-full rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-sm text-white placeholder:text-white/25 focus:border-[#14b8a6]/50 focus:outline-none ${readonly ? "opacity-80" : ""}`;
+}
+
+function buttonClass(accent: "teal" | "white" | "red" = "white") {
+  if (accent === "teal") {
+    return "flex items-center justify-center gap-2 rounded-xl border border-[#14b8a6]/30 bg-[#14b8a6]/15 px-4 py-2.5 text-sm font-medium text-white transition enabled:hover:border-[#14b8a6]/50 enabled:hover:bg-[#14b8a6]/25 disabled:cursor-not-allowed disabled:opacity-40";
+  }
+  if (accent === "red") {
+    return "rounded-lg border border-red-400/25 bg-red-500/10 px-3 py-2 text-sm text-red-100/90 hover:bg-red-500/20";
+  }
+  return "flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm text-white hover:bg-white/10";
 }
 
 function sectionTitle(text: string) {
@@ -85,8 +96,30 @@ function sectionTitle(text: string) {
   );
 }
 
+function roleLabel(role: string) {
+  if (role === "hook") return "HOOK / ОБЛОЖКА";
+  if (role === "cta") return "CTA / ФИНАЛ";
+  return "CONTENT";
+}
+
 function buildStructuredMarkdown(r: RewrittenSource): string {
   const lines: string[] = ["# Переписанный материал", ""];
+  if (r.rewrittenCarouselPages?.length) {
+    lines.push("## Карусель", "");
+    for (const p of r.rewrittenCarouselPages) {
+      lines.push(`### Страница ${p.pageNumber} — ${roleLabel(p.role)}`, "", p.rewrittenText, "");
+      if (p.visualPrompt.trim()) {
+        lines.push("Визуальное ТЗ:", p.visualPrompt, "");
+      }
+    }
+    if (r.rewrittenCaption?.trim()) {
+      lines.push("## Подпись", "", r.rewrittenCaption, "");
+    }
+    if (r.carouselPromptPack?.trim()) {
+      lines.push("## GPT Prompt Pack", "", r.carouselPromptPack, "");
+    }
+    return lines.join("\n");
+  }
   if (r.rewrittenPages?.length) {
     for (const p of r.rewrittenPages) {
       lines.push(`## Страница ${p.pageNumber}`, "", p.rewrittenText, "");
@@ -103,6 +136,7 @@ function buildStructuredMarkdown(r: RewrittenSource): string {
     lines.push("## Транскрипт", "", r.rewrittenTranscript, "");
     return lines.join("\n");
   }
+  lines.push(r.fullRewrittenText);
   return lines.join("\n");
 }
 
@@ -140,39 +174,24 @@ function VisualAssetFields({
           className={fieldClass()}
           value={asset.type}
           onChange={(e) =>
-            set({
-              type: e.target.value as ExtractedVisualDescription["type"],
-            })
+            set({ type: e.target.value as ExtractedVisualDescription["type"] })
           }
         >
-          {(
-            [
-              "photo",
-              "screenshot",
-              "chart",
-              "graphic",
-              "ui",
-              "unknown",
-            ] as const
-          ).map((t) => (
-            <option key={t} value={t}>
-              {t}
-            </option>
+          {(["photo", "screenshot", "chart", "graphic", "ui", "unknown"] as const).map((t) => (
+            <option key={t} value={t}>{t}</option>
           ))}
         </select>
       </label>
-      {(
-        [
-          ["visibleText", "видимый текст"],
-          ["visualDescription", "визуальное описание"],
-          ["styleDescription", "описание стиля"],
-          ["clothing", "одежда"],
-          ["accessoriesAndProps", "аксессуары и реквизит"],
-          ["lighting", "освещение"],
-          ["background", "фон"],
-          ["composition", "композиция"],
-        ] as const
-      ).map(([key, label]) => (
+      {([
+        ["visibleText", "видимый текст"],
+        ["visualDescription", "визуальное описание"],
+        ["styleDescription", "описание стиля"],
+        ["clothing", "одежда"],
+        ["accessoriesAndProps", "аксессуары и реквизит"],
+        ["lighting", "освещение"],
+        ["background", "фон"],
+        ["composition", "композиция"],
+      ] as const).map(([key, label]) => (
         <label key={key} className="block text-xs text-white/45">
           {label}
           <textarea
@@ -188,12 +207,7 @@ function VisualAssetFields({
           className={`${fieldClass()} min-h-[52px]`}
           value={asset.colors.join("\n")}
           onChange={(e) =>
-            set({
-              colors: e.target.value
-                .split("\n")
-                .map((s) => s.trim())
-                .filter(Boolean),
-            })
+            set({ colors: e.target.value.split("\n").map((s) => s.trim()).filter(Boolean) })
           }
         />
       </label>
@@ -203,12 +217,7 @@ function VisualAssetFields({
           className={`${fieldClass()} min-h-[52px]`}
           value={asset.recreationNotes.join("\n")}
           onChange={(e) =>
-            set({
-              recreationNotes: e.target.value
-                .split("\n")
-                .map((s) => s.trim())
-                .filter(Boolean),
-            })
+            set({ recreationNotes: e.target.value.split("\n").map((s) => s.trim()).filter(Boolean) })
           }
         />
       </label>
@@ -220,17 +229,17 @@ export function SourceRewriterPipeline() {
   const fileRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
   const [fileKey, setFileKey] = useState(0);
-  const [status, setStatus] = useState<
-    "idle" | "extracting" | "rewriting" | "error"
-  >("idle");
+  const [status, setStatus] = useState<"idle" | "extracting" | "rewriting" | "error">("idle");
   const [extracted, setExtracted] = useState<ExtractedSource | null>(null);
   const [editedSource, setEditedSource] = useState<ExtractedSource | null>(null);
   const [settings, setSettings] = useState<RewriteSettings>(defaultSettings);
   const [rewritten, setRewritten] = useState<RewrittenSource | null>(null);
   const [errorText, setErrorText] = useState<string | null>(null);
+  const [copiedPrompt, setCopiedPrompt] = useState(false);
 
   const showExtracted = extracted !== null && editedSource !== null;
   const showRewritten = rewritten !== null;
+  const isCarouselMode = settings.rewriteMode === "carousel_script";
 
   const runExtract = async () => {
     if (!file) return;
@@ -239,19 +248,13 @@ export function SourceRewriterPipeline() {
     setExtracted(null);
     setEditedSource(null);
     setRewritten(null);
+    setCopiedPrompt(false);
     setStatus("extracting");
     try {
       const fd = new FormData();
       fd.append("file", file);
-      const r = await fetch("/wb/source-rewriter/extract", {
-        method: "POST",
-        body: fd,
-      });
-      const data = (await r.json()) as ExtractedSource & {
-        error?: string;
-        detail?: string;
-        raw?: string;
-      };
+      const r = await fetch("/wb/source-rewriter/extract", { method: "POST", body: fd });
+      const data = (await r.json()) as ExtractedSource & { error?: string; detail?: string; raw?: string };
       if (!r.ok) {
         const msg = [data.error, data.detail, data.raw].filter(Boolean).join(" — ");
         throw new Error(msg || `HTTP ${r.status}`);
@@ -268,23 +271,17 @@ export function SourceRewriterPipeline() {
   const runRewrite = async () => {
     if (!extracted || !editedSource) return;
     setErrorText(null);
+    setCopiedPrompt(false);
     setStatus("rewriting");
     try {
       const r = await fetch("/wb/source-rewriter/rewrite", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          extractedSource: extracted,
-          editedSource,
-          settings,
-        }),
+        body: JSON.stringify({ extractedSource: extracted, editedSource, settings }),
       });
-      const data = (await r.json()) as RewrittenSource & {
-        error?: string;
-        raw?: string;
-      };
+      const data = (await r.json()) as RewrittenSource & { error?: string; raw?: string; detail?: string };
       if (!r.ok) {
-        const msg = [data.error, data.raw].filter(Boolean).join(" — ");
+        const msg = [data.error, data.detail, data.raw].filter(Boolean).join(" — ");
         throw new Error(msg || `HTTP ${r.status}`);
       }
       setRewritten(data);
@@ -303,16 +300,22 @@ export function SourceRewriterPipeline() {
     setRewritten(null);
     setSettings(defaultSettings);
     setErrorText(null);
+    setCopiedPrompt(false);
     setStatus("idle");
     if (fileRef.current) fileRef.current.value = "";
   };
 
   const copyAll = () => {
     if (!rewritten) return;
-    const text =
-      rewritten.fullRewrittenText.trim() ||
-      buildStructuredMarkdown(rewritten).trim();
+    const text = rewritten.carouselPromptPack?.trim() || rewritten.fullRewrittenText.trim() || buildStructuredMarkdown(rewritten).trim();
     copyText(text);
+  };
+
+  const copyCarouselPrompt = async () => {
+    if (!rewritten?.carouselPromptPack?.trim()) return;
+    await navigator.clipboard.writeText(rewritten.carouselPromptPack);
+    setCopiedPrompt(true);
+    setTimeout(() => setCopiedPrompt(false), 1800);
   };
 
   const setEdited = (updater: (e: ExtractedSource) => ExtractedSource) => {
@@ -322,17 +325,16 @@ export function SourceRewriterPipeline() {
   return (
     <div className="flex flex-col gap-8">
       {errorText && (
-        <div
-          role="alert"
-          className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-100/95"
-        >
+        <div role="alert" className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-100/95">
           {errorText}
         </div>
       )}
 
-      {/* 1. Upload Source */}
       <section className="rounded-xl border border-white/8 bg-white/[0.02] p-4">
-        {sectionTitle("1. Загрузить файл")}
+        {sectionTitle("1. Источник")}
+        <p className="mt-2 text-xs text-white/40">
+          Сейчас рабочий owner-режим: загрузить файл → извлечь текст/транскрипт → собрать карусель и GPT Prompt Pack.
+        </p>
         <input
           key={fileKey}
           ref={fileRef}
@@ -346,41 +348,33 @@ export function SourceRewriterPipeline() {
             setEditedSource(null);
             setRewritten(null);
             setErrorText(null);
+            setCopiedPrompt(false);
           }}
         />
+        {file && (
+          <p className="mt-2 text-xs text-[#5eead4]">Файл выбран: {file.name}</p>
+        )}
         <button
           type="button"
           disabled={!file || status === "extracting"}
           onClick={() => void runExtract()}
-          className="mt-4 flex items-center justify-center gap-2 rounded-xl border border-[#14b8a6]/30 bg-[#14b8a6]/15 px-4 py-2.5 text-sm font-medium text-white transition enabled:hover:border-[#14b8a6]/50 enabled:hover:bg-[#14b8a6]/25 disabled:cursor-not-allowed disabled:opacity-40"
+          className={`mt-4 ${buttonClass("teal")}`}
         >
-          {status === "extracting" && (
-            <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-          )}
-          {status === "extracting" ? "Извлекаю…" : "Извлечь"}
+          {status === "extracting" && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
+          {status === "extracting" ? "Извлекаю текст и транскрипт…" : "Извлечь"}
         </button>
-
       </section>
 
-      {/* 2. Extracted Source */}
       {showExtracted && editedSource && (
         <section className="rounded-xl border border-white/8 bg-white/[0.02] p-4">
           {sectionTitle("2. Извлечённый материал")}
           <div className="mt-3 grid gap-2 text-sm text-white/60">
-            <p>
-              <span className="text-white/40">Файл:</span>{" "}
-              {editedSource.fileName}
-            </p>
-            <p>
-              <span className="text-white/40">Тип:</span>{" "}
-              {editedSource.fileType}
-            </p>
+            <p><span className="text-white/40">Файл:</span> {editedSource.fileName}</p>
+            <p><span className="text-white/40">Тип:</span> {editedSource.fileType}</p>
           </div>
           {editedSource.extractionWarnings.length > 0 && (
             <ul className="mt-3 list-inside list-disc text-sm text-amber-200/90">
-              {editedSource.extractionWarnings.map((w) => (
-                <li key={w}>{w}</li>
-              ))}
+              {editedSource.extractionWarnings.map((w) => <li key={w}>{w}</li>)}
             </ul>
           )}
           <label className="mt-4 block text-xs text-white/45">
@@ -388,12 +382,7 @@ export function SourceRewriterPipeline() {
             <textarea
               className={`${fieldClass()} min-h-[140px] font-mono text-xs`}
               value={editedSource.fullRawText}
-              onChange={(e) =>
-                setEdited((prev) => ({
-                  ...prev,
-                  fullRawText: e.target.value,
-                }))
-              }
+              onChange={(e) => setEdited((prev) => ({ ...prev, fullRawText: e.target.value }))}
             />
           </label>
           {editedSource.transcript !== undefined && (
@@ -402,20 +391,13 @@ export function SourceRewriterPipeline() {
               <textarea
                 className={`${fieldClass()} min-h-[100px] font-mono text-xs`}
                 value={editedSource.transcript ?? ""}
-                onChange={(e) =>
-                  setEdited((prev) => ({
-                    ...prev,
-                    transcript: e.target.value,
-                  }))
-                }
+                onChange={(e) => setEdited((prev) => ({ ...prev, transcript: e.target.value }))}
               />
             </label>
           )}
           {editedSource.pages?.map((page, pi) => (
             <div key={page.pageNumber} className="mt-6 border-t border-white/6 pt-4">
-              <p className="text-sm font-semibold text-white">
-                СТРАНИЦА {page.pageNumber}
-              </p>
+              <p className="text-sm font-semibold text-white">СТРАНИЦА {page.pageNumber}</p>
               <label className="mt-2 block text-xs text-white/45">
                 исходный текст
                 <textarea
@@ -450,13 +432,8 @@ export function SourceRewriterPipeline() {
             </div>
           ))}
           {editedSource.slides?.map((slide, si) => (
-            <div
-              key={slide.slideNumber}
-              className="mt-6 border-t border-white/6 pt-4"
-            >
-              <p className="text-sm font-semibold text-white">
-                СЛАЙД {slide.slideNumber}
-              </p>
+            <div key={slide.slideNumber} className="mt-6 border-t border-white/6 pt-4">
+              <p className="text-sm font-semibold text-white">СЛАЙД {slide.slideNumber}</p>
               <label className="mt-2 block text-xs text-white/45">
                 исходный текст
                 <textarea
@@ -471,40 +448,6 @@ export function SourceRewriterPipeline() {
                   }
                 />
               </label>
-              <label className="mt-2 block text-xs text-white/45">
-                заметки по макету
-                <textarea
-                  className={`${fieldClass()} min-h-[72px]`}
-                  value={slide.layoutNotes}
-                  onChange={(e) =>
-                    setEdited((prev) => {
-                      const slides = [...(prev.slides ?? [])];
-                      slides[si] = {
-                        ...slides[si],
-                        layoutNotes: e.target.value,
-                      };
-                      return { ...prev, slides };
-                    })
-                  }
-                />
-              </label>
-              {slide.visualAssets.map((a, ai) => (
-                <div key={a.id} className="mt-3">
-                  <VisualAssetFields
-                    prefix={`ВИЗУАЛ — слайд ${slide.slideNumber} #${ai + 1}`}
-                    asset={a}
-                    onChange={(next) =>
-                      setEdited((prev) => {
-                        const slides = [...(prev.slides ?? [])];
-                        const vas = [...slides[si].visualAssets];
-                        vas[ai] = next;
-                        slides[si] = { ...slides[si], visualAssets: vas };
-                        return { ...prev, slides };
-                      })
-                    }
-                  />
-                </div>
-              ))}
             </div>
           ))}
           {editedSource.visualAssets.length > 0 && (
@@ -528,10 +471,9 @@ export function SourceRewriterPipeline() {
         </section>
       )}
 
-      {/* 3. Rewrite Settings */}
       {showExtracted && (
         <section className="rounded-xl border border-white/8 bg-white/[0.02] p-4">
-          {sectionTitle("3. Настройки")}
+          {sectionTitle("3. Настройки рерайта")}
           <div className="mt-4 grid gap-4 md:grid-cols-2">
             <label className="block text-xs text-white/45">
               Режим
@@ -539,17 +481,10 @@ export function SourceRewriterPipeline() {
                 className={fieldClass()}
                 value={settings.rewriteMode}
                 onChange={(e) =>
-                  setSettings((s) => ({
-                    ...s,
-                    rewriteMode: e.target.value as RewriteMode,
-                  }))
+                  setSettings((s) => ({ ...s, rewriteMode: e.target.value as RewriteMode }))
                 }
               >
-                {REWRITE_MODE_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
+                {REWRITE_MODE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
             </label>
             <label className="block text-xs text-white/45">
@@ -557,18 +492,9 @@ export function SourceRewriterPipeline() {
               <select
                 className={fieldClass()}
                 value={settings.outputLength}
-                onChange={(e) =>
-                  setSettings((s) => ({
-                    ...s,
-                    outputLength: e.target.value as OutputLength,
-                  }))
-                }
+                onChange={(e) => setSettings((s) => ({ ...s, outputLength: e.target.value as OutputLength }))}
               >
-                {OUTPUT_LENGTH_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
+                {OUTPUT_LENGTH_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
             </label>
             <label className="block text-xs text-white/45">
@@ -576,18 +502,9 @@ export function SourceRewriterPipeline() {
               <select
                 className={fieldClass()}
                 value={settings.styleIntensity}
-                onChange={(e) =>
-                  setSettings((s) => ({
-                    ...s,
-                    styleIntensity: e.target.value as StyleIntensity,
-                  }))
-                }
+                onChange={(e) => setSettings((s) => ({ ...s, styleIntensity: e.target.value as StyleIntensity }))}
               >
-                {STYLE_INTENSITY_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
+                {STYLE_INTENSITY_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
             </label>
             <label className="block text-xs text-white/45">
@@ -595,220 +512,281 @@ export function SourceRewriterPipeline() {
               <select
                 className={fieldClass()}
                 value={settings.plagiarismSafety}
-                onChange={(e) =>
-                  setSettings((s) => ({
-                    ...s,
-                    plagiarismSafety: e.target.value as PlagiarismSafety,
-                  }))
-                }
+                onChange={(e) => setSettings((s) => ({ ...s, plagiarismSafety: e.target.value as PlagiarismSafety }))}
               >
-                {PLAGIARISM_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
+                {PLAGIARISM_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
             </label>
           </div>
+
+          {isCarouselMode && (
+            <div className="mt-5 rounded-xl border border-[#14b8a6]/20 bg-[#14b8a6]/5 p-4">
+              <p className="text-sm font-semibold text-[#5eead4]">Карусельный режим включён</p>
+              <p className="mt-1 text-xs text-white/45">
+                Backend обязан вернуть страницы с ролями hook/content/cta и готовый GPT Prompt Pack.
+              </p>
+              <div className="mt-4 grid gap-4 md:grid-cols-2">
+                <label className="block text-xs text-white/45">
+                  Количество страниц
+                  <input
+                    type="number"
+                    min={3}
+                    max={10}
+                    className={fieldClass()}
+                    value={settings.carouselSlideCount ?? 6}
+                    onChange={(e) =>
+                      setSettings((s) => ({ ...s, carouselSlideCount: Number(e.target.value) }))
+                    }
+                  />
+                </label>
+                <label className="block text-xs text-white/45">
+                  Максимум символов на слайд
+                  <input
+                    type="number"
+                    min={60}
+                    max={260}
+                    className={fieldClass()}
+                    value={settings.carouselMaxCharsPerSlide ?? 140}
+                    onChange={(e) =>
+                      setSettings((s) => ({ ...s, carouselMaxCharsPerSlide: Number(e.target.value) }))
+                    }
+                  />
+                </label>
+              </div>
+              <label className="mt-4 block text-xs text-white/45">
+                Стиль / референс / персонаж для GPT Prompt Pack
+                <textarea
+                  className={`${fieldClass()} min-h-[80px]`}
+                  placeholder="Например: использовать мой прикреплённый портрет как главного персонажа; стиль — тёмный premium minimalism; акценты — синий/бирюзовый; без мелкого текста."
+                  value={settings.carouselStyleNotes ?? ""}
+                  onChange={(e) => setSettings((s) => ({ ...s, carouselStyleNotes: e.target.value }))}
+                />
+              </label>
+              <label className="mt-4 block text-xs text-white/45">
+                CTA для последней страницы
+                <input
+                  className={fieldClass()}
+                  value={settings.carouselCtaText ?? ""}
+                  onChange={(e) => setSettings((s) => ({ ...s, carouselCtaText: e.target.value }))}
+                />
+              </label>
+            </div>
+          )}
+
           <button
             type="button"
             disabled={!extracted || status === "rewriting"}
             onClick={() => void runRewrite()}
-            className="mt-4 flex items-center justify-center gap-2 rounded-xl border border-[#14b8a6]/30 bg-[#14b8a6]/15 px-4 py-2.5 text-sm font-medium text-white transition enabled:hover:border-[#14b8a6]/50 enabled:hover:bg-[#14b8a6]/25 disabled:cursor-not-allowed disabled:opacity-40"
+            className={`mt-4 ${buttonClass("teal")}`}
           >
-            {status === "rewriting" && (
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-            )}
-            {status === "rewriting" ? "Переписываю…" : "Переписать"}
+            {status === "rewriting" && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
+            {status === "rewriting" ? "Собираю результат…" : isCarouselMode ? "Собрать карусель + GPT Prompt Pack" : "Переписать"}
           </button>
         </section>
       )}
 
-      {/* 4. Rewritten Result */}
       {showRewritten && rewritten && (
         <section className="rounded-xl border border-white/8 bg-white/[0.02] p-4">
           {sectionTitle("4. Результат")}
-          <label className="mt-3 block text-xs text-white/45">
-            Переписанный текст
-            <textarea
-              className={`${fieldClass()} min-h-[160px]`}
-              value={rewritten.fullRewrittenText}
-              onChange={(e) =>
-                setRewritten((r) =>
-                  r ? { ...r, fullRewrittenText: e.target.value } : r
-                )
-              }
-            />
-          </label>
-          {rewritten.rewrittenPages?.map((p) => (
-            <div key={p.pageNumber} className="mt-6 border-t border-white/6 pt-4">
-              <p className="text-sm font-semibold text-white">
-                СТРАНИЦА {p.pageNumber}
-              </p>
-              <label className="mt-2 block text-xs text-white/45">
-                переписанный текст
+
+          {rewritten.rewrittenCarouselPages?.length ? (
+            <div className="space-y-5">
+              <div className="rounded-xl border border-[#14b8a6]/20 bg-[#14b8a6]/5 p-3 text-sm text-white/75">
+                Готово: карусель разбита на страницы, первая страница — hook, последняя — CTA. Ниже готовый текст и визуальные ТЗ для каждого слайда.
+              </div>
+              {rewritten.rewrittenCarouselPages.map((p) => (
+                <div key={p.pageNumber} className="rounded-xl border border-white/8 bg-black/20 p-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-sm font-semibold text-white">СТРАНИЦА {p.pageNumber}</p>
+                    <span className="rounded-full border border-[#14b8a6]/30 bg-[#14b8a6]/10 px-2 py-0.5 text-[10px] font-semibold text-[#5eead4]">
+                      {roleLabel(p.role)}
+                    </span>
+                  </div>
+                  <label className="mt-3 block text-xs text-white/45">
+                    текст на слайде
+                    <textarea
+                      className={`${fieldClass()} min-h-[90px]`}
+                      value={p.rewrittenText}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setRewritten((prev) => {
+                          if (!prev?.rewrittenCarouselPages) return prev;
+                          return {
+                            ...prev,
+                            rewrittenCarouselPages: prev.rewrittenCarouselPages.map((x) =>
+                              x.pageNumber === p.pageNumber ? { ...x, rewrittenText: val } : x
+                            ),
+                          };
+                        });
+                      }}
+                    />
+                  </label>
+                  <label className="mt-3 block text-xs text-white/45">
+                    визуальное ТЗ для слайда
+                    <textarea
+                      className={`${fieldClass()} min-h-[80px]`}
+                      value={p.visualPrompt}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setRewritten((prev) => {
+                          if (!prev?.rewrittenCarouselPages) return prev;
+                          return {
+                            ...prev,
+                            rewrittenCarouselPages: prev.rewrittenCarouselPages.map((x) =>
+                              x.pageNumber === p.pageNumber ? { ...x, visualPrompt: val } : x
+                            ),
+                          };
+                        });
+                      }}
+                    />
+                  </label>
+                </div>
+              ))}
+              <label className="block text-xs text-white/45">
+                Подпись к публикации
                 <textarea
                   className={`${fieldClass()} min-h-[100px]`}
-                  value={p.rewrittenText}
+                  value={rewritten.rewrittenCaption ?? ""}
                   onChange={(e) =>
-                    setRewritten((prev) => {
-                      if (!prev?.rewrittenPages) return prev;
-                      const pages = prev.rewrittenPages.map((x) =>
-                        x.pageNumber === p.pageNumber
-                          ? { ...x, rewrittenText: e.target.value }
-                          : x
-                      );
-                      return { ...prev, rewrittenPages: pages };
-                    })
+                    setRewritten((r) => (r ? { ...r, rewrittenCaption: e.target.value } : r))
                   }
                 />
               </label>
-              <p className="mt-2 text-xs text-white/40">визуальное описание сохранено</p>
-              {p.visualAssets.map((a) => (
-                <div
-                  key={a.id}
-                  className="mt-2 rounded border border-white/6 bg-black/20 p-2 text-xs text-white/55"
-                >
-                  <p className="text-white/70">{a.type}</p>
-                  <p className="mt-1 whitespace-pre-wrap">{a.visualDescription}</p>
+              <div className="rounded-xl border border-[#5b8def]/20 bg-[#5b8def]/5 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-[#9db9ff]">GPT Prompt Pack</p>
+                    <p className="mt-1 text-xs text-white/45">
+                      Это готовый промпт для ChatGPT/генератора карусели. Сюда уже собраны тексты страниц, роли, визуальные ТЗ и стиль.
+                    </p>
+                  </div>
+                  <button type="button" onClick={copyCarouselPrompt} className={buttonClass("white")}>
+                    <ClipboardCopy className="h-4 w-4" /> {copiedPrompt ? "Скопировано" : "Скопировать prompt"}
+                  </button>
                 </div>
-              ))}
-            </div>
-          ))}
-          {rewritten.rewrittenSlides?.map((s) => (
-            <div
-              key={s.slideNumber}
-              className="mt-6 border-t border-white/6 pt-4"
-            >
-              <p className="text-sm font-semibold text-white">
-                СЛАЙД {s.slideNumber}
-              </p>
-              <label className="mt-2 block text-xs text-white/45">
-                переписанный текст
                 <textarea
-                  className={`${fieldClass()} min-h-[100px]`}
-                  value={s.rewrittenText}
-                  onChange={(e) =>
-                    setRewritten((prev) => {
-                      if (!prev?.rewrittenSlides) return prev;
-                      const slides = prev.rewrittenSlides.map((x) =>
-                        x.slideNumber === s.slideNumber
-                          ? { ...x, rewrittenText: e.target.value }
-                          : x
-                      );
-                      return { ...prev, rewrittenSlides: slides };
-                    })
-                  }
+                  readOnly
+                  className={`${fieldClass(true)} mt-3 min-h-[220px] font-mono text-xs`}
+                  value={rewritten.carouselPromptPack ?? ""}
+                />
+              </div>
+            </div>
+          ) : (
+            <>
+              <label className="mt-3 block text-xs text-white/45">
+                Переписанный текст
+                <textarea
+                  className={`${fieldClass()} min-h-[160px]`}
+                  value={rewritten.fullRewrittenText}
+                  onChange={(e) => setRewritten((r) => (r ? { ...r, fullRewrittenText: e.target.value } : r))}
                 />
               </label>
-              <p className="mt-1 text-xs text-white/40">
-                визуальное описание сохранено · заметки: {s.layoutNotes || "—"}
-              </p>
-              {s.visualAssets.map((a) => (
-                <div
-                  key={a.id}
-                  className="mt-2 rounded border border-white/6 bg-black/20 p-2 text-xs text-white/55"
-                >
-                  <p className="text-white/70">{a.type}</p>
-                  <p className="mt-1 whitespace-pre-wrap">{a.visualDescription}</p>
+              {rewritten.rewrittenPages?.map((p) => (
+                <div key={p.pageNumber} className="mt-6 border-t border-white/6 pt-4">
+                  <p className="text-sm font-semibold text-white">СТРАНИЦА {p.pageNumber}</p>
+                  <label className="mt-2 block text-xs text-white/45">
+                    переписанный текст
+                    <textarea
+                      className={`${fieldClass()} min-h-[100px]`}
+                      value={p.rewrittenText}
+                      onChange={(e) =>
+                        setRewritten((prev) => {
+                          if (!prev?.rewrittenPages) return prev;
+                          const pages = prev.rewrittenPages.map((x) =>
+                            x.pageNumber === p.pageNumber ? { ...x, rewrittenText: e.target.value } : x
+                          );
+                          return { ...prev, rewrittenPages: pages };
+                        })
+                      }
+                    />
+                  </label>
                 </div>
               ))}
-            </div>
-          ))}
-          {rewritten.rewrittenTranscript !== undefined && (
-            <label className="mt-4 block text-xs text-white/45">
-              Переписанный транскрипт
-              <textarea
-                className={`${fieldClass()} min-h-[100px]`}
-                value={rewritten.rewrittenTranscript ?? ""}
-                onChange={(e) =>
-                  setRewritten((r) =>
-                    r ? { ...r, rewrittenTranscript: e.target.value } : r
-                  )
-                }
-              />
-            </label>
+              {rewritten.rewrittenSlides?.map((s) => (
+                <div key={s.slideNumber} className="mt-6 border-t border-white/6 pt-4">
+                  <p className="text-sm font-semibold text-white">СЛАЙД {s.slideNumber}</p>
+                  <label className="mt-2 block text-xs text-white/45">
+                    переписанный текст
+                    <textarea
+                      className={`${fieldClass()} min-h-[100px]`}
+                      value={s.rewrittenText}
+                      onChange={(e) =>
+                        setRewritten((prev) => {
+                          if (!prev?.rewrittenSlides) return prev;
+                          const slides = prev.rewrittenSlides.map((x) =>
+                            x.slideNumber === s.slideNumber ? { ...x, rewrittenText: e.target.value } : x
+                          );
+                          return { ...prev, rewrittenSlides: slides };
+                        })
+                      }
+                    />
+                  </label>
+                </div>
+              ))}
+              {rewritten.rewrittenTranscript !== undefined && (
+                <label className="mt-4 block text-xs text-white/45">
+                  Переписанный транскрипт
+                  <textarea
+                    className={`${fieldClass()} min-h-[100px]`}
+                    value={rewritten.rewrittenTranscript ?? ""}
+                    onChange={(e) => setRewritten((r) => (r ? { ...r, rewrittenTranscript: e.target.value } : r))}
+                  />
+                </label>
+              )}
+            </>
           )}
+
           {rewritten.notes.length > 0 && (
             <div className="mt-4">
               <p className="text-xs text-white/45">Заметки</p>
               <ul className="mt-1 list-inside list-disc text-sm text-white/70">
-                {rewritten.notes.map((n) => (
-                  <li key={n}>{n}</li>
-                ))}
+                {rewritten.notes.map((n) => <li key={n}>{n}</li>)}
               </ul>
             </div>
           )}
         </section>
       )}
 
-      {/* 5. Export */}
       {showRewritten && (
         <section className="rounded-xl border border-white/8 bg-white/[0.02] p-4">
           {sectionTitle("5. Экспорт")}
           <div className="mt-4 flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={copyAll}
-              className="rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm text-white hover:bg-white/10"
-            >
-              Скопировать всё
+            <button type="button" onClick={copyAll} className={buttonClass("white")}>
+              <ClipboardCopy className="h-4 w-4" />
+              {rewritten?.carouselPromptPack ? "Скопировать GPT prompt" : "Скопировать всё"}
             </button>
             <button
               type="button"
               onClick={() => {
                 if (!rewritten) return;
-                const content =
-                  rewritten.fullRewrittenText.trim() ||
-                  buildStructuredMarkdown(rewritten);
-                downloadBlob(
-                  "source-rewriter-result.txt",
-                  content,
-                  "text/plain;charset=utf-8"
-                );
+                const content = buildStructuredMarkdown(rewritten);
+                downloadBlob("source-rewriter-result.txt", content, "text/plain;charset=utf-8");
               }}
-              className="rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm text-white hover:bg-white/10"
+              className={buttonClass("white")}
             >
-              Скачать .txt
+              <Download className="h-4 w-4" /> Скачать .txt
             </button>
             <button
               type="button"
               onClick={() => {
                 if (!rewritten) return;
-                const content =
-                  rewritten.fullRewrittenText.trim() ||
-                  buildStructuredMarkdown(rewritten);
-                downloadBlob(
-                  "source-rewriter-result.md",
-                  content,
-                  "text/markdown;charset=utf-8"
-                );
+                downloadBlob("source-rewriter-result.md", buildStructuredMarkdown(rewritten), "text/markdown;charset=utf-8");
               }}
-              className="rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm text-white hover:bg-white/10"
+              className={buttonClass("white")}
             >
-              Скачать .md
+              <Download className="h-4 w-4" /> Скачать .md
             </button>
             <button
               type="button"
               onClick={() => {
                 if (!rewritten) return;
-                downloadBlob(
-                  "source-rewriter-result.json",
-                  JSON.stringify(rewritten, null, 2),
-                  "application/json"
-                );
+                downloadBlob("source-rewriter-result.json", JSON.stringify(rewritten, null, 2), "application/json");
               }}
-              className="rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm text-white hover:bg-white/10"
+              className={buttonClass("white")}
             >
               Скачать JSON
             </button>
-            <button
-              type="button"
-              onClick={resetAll}
-              className="rounded-lg border border-red-400/25 bg-red-500/10 px-3 py-2 text-sm text-red-100/90 hover:bg-red-500/20"
-            >
-              Сбросить
-            </button>
+            <button type="button" onClick={resetAll} className={buttonClass("red")}>Сбросить</button>
           </div>
         </section>
       )}
