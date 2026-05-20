@@ -147,6 +147,21 @@ export type WorkflowArtifact = {
   createdAt: string;
 };
 
+export type TaskIntent = "create" | "remix" | "rewrite" | "analyze" | "replicate" | "extract" | "unknown";
+
+export type OutputFormat = "carousel" | "post" | "text_post" | "lipsync" | "document" | "analysis" | "unknown";
+
+export type NormalizedTaskCard = {
+  intent: TaskIntent;
+  outputFormat: OutputFormat;
+  sourceTypes: WorkflowArtifactType[];
+  cta?: string;
+  missingFields: string[];
+  confidence: "high" | "medium" | "low";
+  shouldAskUser: boolean;
+  suggestedQuestions: string[];
+};
+
 export type WorkflowMemoryEvent = {
   id: string;
   ts: string;
@@ -200,6 +215,7 @@ export type AgentWorkflow = {
   userRequest: string;
   ceoPlan: string | null;
   sharedContextSnapshot: string | null;
+  taskCard: NormalizedTaskCard | null;
   artifacts: WorkflowArtifact[];
   steps: AgentWorkflowStep[];
   memoryEvents: WorkflowMemoryEvent[];
@@ -212,6 +228,7 @@ export type AgentWorkflow = {
 export type CreateWorkflowPlanInput = {
   title: string;
   userRequest: string;
+  artifacts?: WorkflowArtifact[];
 };
 
 export type WorkflowResponse = {
