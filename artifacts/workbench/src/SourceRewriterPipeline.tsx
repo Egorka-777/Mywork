@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { ClipboardCopy, Download, Loader2 } from "lucide-react";
+import { ClipboardCopy, Download, ImageIcon, Loader2 } from "lucide-react";
 import type {
   ExtractedSource,
   ExtractedVisualDescription,
@@ -88,6 +88,10 @@ function buttonClass(accent: "teal" | "white" | "red" = "white") {
   return "flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm text-white hover:bg-white/10";
 }
 
+function uploadLabelClass() {
+  return "flex cursor-pointer items-center gap-2 rounded-xl border border-white/8 bg-white/[0.03] px-3 py-2 text-sm text-white/50 transition hover:border-white/15 hover:text-white/70";
+}
+
 function sectionTitle(text: string) {
   return (
     <h3 className="font-sans text-sm font-semibold tracking-wide text-white/90 uppercase">
@@ -102,7 +106,118 @@ function roleLabel(role: string) {
   return "CONTENT";
 }
 
-function buildStructuredMarkdown(r: RewrittenSource): string {
+function buildSourceCarouselGptPromptPack(
+  r: RewrittenSource,
+  styleNotes: string,
+  styleReferenceCount: number,
+  hasCharacterReference: boolean
+): string {
+  const pages = r.rewrittenCarouselPages ?? [];
+  const slideCount = pages.length;
+
+  const slideBlocks = pages.map((p) => {
+    const role = p.role === "hook" ? "COVER" : p.role === "cta" ? "CTA" : "CONTENT";
+    const people = hasCharacterReference
+      ? "- Use the attached character/person reference image when a person, face, founder, author, expert or main character is needed. Preserve identity, age range, face structure, hair, gender presentation and realistic proportions."
+      : "- none unless the slide text explicitly requires a person";
+
+    return `SLIDE ${p.pageNumber}
+ROLE: ${role}
+ORIGINAL STRUCTURE: Source Rewriter carousel draft from uploaded source material
+TEXT FOR SLIDE:
+${p.rewrittenText}
+
+VISUAL DESCRIPTION:
+${p.visualPrompt || "Create a clean readable slide based on the slide text."}
+
+VISUAL ELEMENTS:
+- Use visual elements that directly explain the slide text.
+- Do not add decorative elements that do not support meaning.
+
+PEOPLE:
+${people}
+
+BRANDS / TOOLS / PLATFORMS:
+- Detect brands, services, apps, tools, neural networks, companies and platforms from the slide text and visual description.
+- Use recognizable logos, app icons or minimal stylized symbols when they help explain the meaning.
+
+SCREENSHOT:
+- no locked screenshot by default
+
+CHATGPT VISUAL NOTES:
+${p.visualPrompt || "- Keep the slide clean, readable and visually connected to the rest of the carousel."}`;
+  });
+
+  const styleNotesLine = styleReferenceCount > 0
+    ? `Стиль карусели: как на ${styleReferenceCount} прикреплённом(ых) референсе(ах).${styleNotes.trim() ? ` Дополнительно: ${styleNotes.trim()}` : ""}`
+    : styleNotes.trim()
+      ? `Стиль карусели: ${styleNotes.trim()}`
+      : "Стиль карусели: premium clean social carousel, readable, modern, strong hierarchy.";
+
+  const referenceRule = styleReferenceCount > 0
+    ? "Референс использовать не как пример темы, а как точный визуальный ориентир. Не описывай стиль — считывай его напрямую с прикреплённого изображения: типографику, сетку, отступы, цвета, разделители, шапку, footer, нумерацию слайдов. Все слайды должны выглядеть как единая серия в точно том же визуальном стиле, что и на референсе."
+    : "Если визуальный референс не прикреплён, собери единый современный стиль сам: крупная типографика, сильная иерархия, чистые отступы, аккуратные карточки/акценты, без случайного декора.";
+
+  const characterRule = hasCharacterReference
+    ? `
+
+ВАЖНО ПО ПЕРСОНАЖУ:
+К сообщению прикреплено изображение персонажа/человека. Если на слайде нужен человек, автор, эксперт, герой или лицо в кадре — используй прикреплённый character reference как главный визуальный ориентир. Сохраняй внешность, пол, возрастной диапазон, причёску, черты лица и узнаваемость. Не меняй идентичность. Если человек на конкретном слайде не нужен по смыслу, не вставляй его принудительно.`
+    : "";
+
+  return `Создай мне карусель из ${slideCount} слайдов.
+
+${styleNotesLine}
+
+${referenceRule}${characterRule}
+
+ВАЖНО ПО ВИЗУАЛИЗАЦИИ:
+Если в тексте слайда упоминаются:
+- нейросети;
+- сервисы;
+- сайты;
+- приложения;
+- компании;
+- бренды;
+- известные люди;
+- платформы;
+- технологии;
+
+то обязательно добавь визуальные элементы по этим названиям:
+- для сервисов, сайтов, приложений и нейросетей: логотипы, иконки, app icons или стилизованные узнаваемые символы;
+- для известных людей: портрет / лицо / силуэт / визуальный образ человека;
+- для брендов и компаний: логотип или фирменный визуальный знак;
+- если точный логотип нельзя использовать или он плохо читается, сделай минималистичную стилизованную иконку рядом с названием;
+- визуал должен помогать понять смысл, а не быть декором ради декора.
+
+ОБЩИЕ ПРАВИЛА:
+- Формат каждого слайда: вертикальный Instagram carousel, 4:5.
+- Каждый слайд должен быть отдельным полноценным изображением.
+- Все слайды должны быть в одном стиле.
+- Сохраняй точный смысл текста.
+- Используй TEXT FOR SLIDE как финальный текст на слайде.
+- Не добавляй лишние факты, которых нет в исходном тексте.
+- Не меняй названия сервисов, брендов и людей.
+- Не сокращай важные названия.
+- Если текста много, аккуратно структурируй его в блоки, списки, карточки или колонки.
+- Если на слайде список инструментов, сделай его читаемым: номер, иконка/логотип, название, короткое описание.
+- Если слайд является обложкой, сделай его максимально цепляющим: крупный заголовок-хук, ощущение секрета/пользы/выгоды, сильный визуальный образ, минимум лишнего.
+- Если слайд является финальным CTA, сделай его максимально понятным и конверсионным: крупный вопрос/обещание, действие, ключевое слово для комментария.
+- Используй синий цвет для смысловых акцентов: цифры, ключевые слова, CTA, номера слайдов.
+- Не перегружай слайды мелким текстом.
+- Текст должен быть крупным, читаемым и аккуратно выровненным.
+- Не делай мультяшный, детский или шаблонный дизайн.
+- Не используй случайные декоративные элементы.
+- Не делай дизайн в стиле презентации PowerPoint.
+- Не делай кислотные цвета.
+- Не делай дешёвые 3D-эффекты.
+- Не добавляй водяные знаки.
+
+ДАННЫЕ ДЛЯ СЛАЙДОВ:
+${slideBlocks.join("\n\n---\n\n")}`;
+}
+
+function buildStructuredMarkdown(r: RewrittenSource, promptOverride?: string): string {
   const lines: string[] = ["# Переписанный материал", ""];
   if (r.rewrittenCarouselPages?.length) {
     lines.push("## Карусель", "");
@@ -115,8 +230,9 @@ function buildStructuredMarkdown(r: RewrittenSource): string {
     if (r.rewrittenCaption?.trim()) {
       lines.push("## Подпись", "", r.rewrittenCaption, "");
     }
-    if (r.carouselPromptPack?.trim()) {
-      lines.push("## GPT Prompt Pack", "", r.carouselPromptPack, "");
+    const prompt = promptOverride ?? r.carouselPromptPack ?? "";
+    if (prompt.trim()) {
+      lines.push("## GPT Prompt Pack", "", prompt, "");
     }
     return lines.join("\n");
   }
@@ -227,6 +343,8 @@ function VisualAssetFields({
 
 export function SourceRewriterPipeline() {
   const fileRef = useRef<HTMLInputElement>(null);
+  const styleRefFilesRef = useRef<File[]>([]);
+  const characterRefFileRef = useRef<File | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [fileKey, setFileKey] = useState(0);
   const [status, setStatus] = useState<"idle" | "extracting" | "rewriting" | "error">("idle");
@@ -236,10 +354,37 @@ export function SourceRewriterPipeline() {
   const [rewritten, setRewritten] = useState<RewrittenSource | null>(null);
   const [errorText, setErrorText] = useState<string | null>(null);
   const [copiedPrompt, setCopiedPrompt] = useState(false);
+  const [styleRefPreviews, setStyleRefPreviews] = useState<string[]>([]);
+  const [characterRefPreview, setCharacterRefPreview] = useState<string | null>(null);
+  const [characterRefName, setCharacterRefName] = useState<string>("");
 
   const showExtracted = extracted !== null && editedSource !== null;
   const showRewritten = rewritten !== null;
   const isCarouselMode = settings.rewriteMode === "carousel_script";
+
+  const getCurrentPromptPack = (source = rewritten) => {
+    if (!source) return "";
+    if (source.rewrittenCarouselPages?.length) {
+      return buildSourceCarouselGptPromptPack(
+        source,
+        settings.carouselStyleNotes ?? "",
+        styleRefPreviews.length,
+        Boolean(characterRefPreview)
+      );
+    }
+    return source.carouselPromptPack ?? "";
+  };
+
+  const buildCarouselStyleNotesForRequest = () => {
+    const notes = [settings.carouselStyleNotes?.trim()].filter(Boolean) as string[];
+    if (styleRefPreviews.length > 0) {
+      notes.push(`В финальном GPT Prompt Pack пользователь прикрепит ${styleRefPreviews.length} style reference image(s). Prompt должен требовать считать стиль с прикреплённых референсов напрямую.`);
+    }
+    if (characterRefPreview) {
+      notes.push("В финальном GPT Prompt Pack пользователь прикрепит character/person reference image. Prompt должен требовать использовать его только там, где по смыслу нужен персонаж/человек, с сохранением идентичности.");
+    }
+    return notes.join("\n");
+  };
 
   const runExtract = async () => {
     if (!file) return;
@@ -274,17 +419,24 @@ export function SourceRewriterPipeline() {
     setCopiedPrompt(false);
     setStatus("rewriting");
     try {
+      const requestSettings: RewriteSettings = isCarouselMode
+        ? { ...settings, carouselStyleNotes: buildCarouselStyleNotesForRequest() }
+        : settings;
       const r = await fetch("/wb/source-rewriter/rewrite", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ extractedSource: extracted, editedSource, settings }),
+        body: JSON.stringify({ extractedSource: extracted, editedSource, settings: requestSettings }),
       });
       const data = (await r.json()) as RewrittenSource & { error?: string; raw?: string; detail?: string };
       if (!r.ok) {
         const msg = [data.error, data.detail, data.raw].filter(Boolean).join(" — ");
         throw new Error(msg || `HTTP ${r.status}`);
       }
-      setRewritten(data);
+      setRewritten(
+        data.rewrittenCarouselPages?.length
+          ? { ...data, carouselPromptPack: buildSourceCarouselGptPromptPack(data, settings.carouselStyleNotes ?? "", styleRefPreviews.length, Boolean(characterRefPreview)) }
+          : data
+      );
       setStatus("idle");
     } catch (e) {
       setStatus("error");
@@ -302,18 +454,27 @@ export function SourceRewriterPipeline() {
     setErrorText(null);
     setCopiedPrompt(false);
     setStatus("idle");
+    styleRefPreviews.forEach((u) => URL.revokeObjectURL(u));
+    if (characterRefPreview) URL.revokeObjectURL(characterRefPreview);
+    styleRefFilesRef.current = [];
+    characterRefFileRef.current = null;
+    setStyleRefPreviews([]);
+    setCharacterRefPreview(null);
+    setCharacterRefName("");
     if (fileRef.current) fileRef.current.value = "";
   };
 
   const copyAll = () => {
     if (!rewritten) return;
-    const text = rewritten.carouselPromptPack?.trim() || rewritten.fullRewrittenText.trim() || buildStructuredMarkdown(rewritten).trim();
+    const prompt = getCurrentPromptPack();
+    const text = prompt.trim() || rewritten.fullRewrittenText.trim() || buildStructuredMarkdown(rewritten, prompt).trim();
     copyText(text);
   };
 
   const copyCarouselPrompt = async () => {
-    if (!rewritten?.carouselPromptPack?.trim()) return;
-    await navigator.clipboard.writeText(rewritten.carouselPromptPack);
+    const prompt = getCurrentPromptPack();
+    if (!prompt.trim()) return;
+    await navigator.clipboard.writeText(prompt);
     setCopiedPrompt(true);
     setTimeout(() => setCopiedPrompt(false), 1800);
   };
@@ -333,7 +494,7 @@ export function SourceRewriterPipeline() {
       <section className="rounded-xl border border-white/8 bg-white/[0.02] p-4">
         {sectionTitle("1. Источник")}
         <p className="mt-2 text-xs text-white/40">
-          Сейчас рабочий owner-режим: загрузить файл → извлечь текст/транскрипт → собрать карусель и GPT Prompt Pack.
+          Загрузить файл → извлечь текст/транскрипт → собрать карусель и GPT Prompt Pack.
         </p>
         <input
           key={fileKey}
@@ -351,9 +512,7 @@ export function SourceRewriterPipeline() {
             setCopiedPrompt(false);
           }}
         />
-        {file && (
-          <p className="mt-2 text-xs text-[#5eead4]">Файл выбран: {file.name}</p>
-        )}
+        {file && <p className="mt-2 text-xs text-[#5eead4]">Файл выбран: {file.name}</p>}
         <button
           type="button"
           disabled={!file || status === "extracting"}
@@ -480,9 +639,7 @@ export function SourceRewriterPipeline() {
               <select
                 className={fieldClass()}
                 value={settings.rewriteMode}
-                onChange={(e) =>
-                  setSettings((s) => ({ ...s, rewriteMode: e.target.value as RewriteMode }))
-                }
+                onChange={(e) => setSettings((s) => ({ ...s, rewriteMode: e.target.value as RewriteMode }))}
               >
                 {REWRITE_MODE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
@@ -523,7 +680,7 @@ export function SourceRewriterPipeline() {
             <div className="mt-5 rounded-xl border border-[#14b8a6]/20 bg-[#14b8a6]/5 p-4">
               <p className="text-sm font-semibold text-[#5eead4]">Карусельный режим включён</p>
               <p className="mt-1 text-xs text-white/45">
-                Backend обязан вернуть страницы с ролями hook/content/cta и готовый GPT Prompt Pack.
+                Структура Prompt Pack собрана как в Instagram Carousel Remix: style reference → character reference → pages → GPT prompt.
               </p>
               <div className="mt-4 grid gap-4 md:grid-cols-2">
                 <label className="block text-xs text-white/45">
@@ -534,9 +691,7 @@ export function SourceRewriterPipeline() {
                     max={10}
                     className={fieldClass()}
                     value={settings.carouselSlideCount ?? 6}
-                    onChange={(e) =>
-                      setSettings((s) => ({ ...s, carouselSlideCount: Number(e.target.value) }))
-                    }
+                    onChange={(e) => setSettings((s) => ({ ...s, carouselSlideCount: Number(e.target.value) }))}
                   />
                 </label>
                 <label className="block text-xs text-white/45">
@@ -547,19 +702,83 @@ export function SourceRewriterPipeline() {
                     max={260}
                     className={fieldClass()}
                     value={settings.carouselMaxCharsPerSlide ?? 140}
-                    onChange={(e) =>
-                      setSettings((s) => ({ ...s, carouselMaxCharsPerSlide: Number(e.target.value) }))
-                    }
+                    onChange={(e) => setSettings((s) => ({ ...s, carouselMaxCharsPerSlide: Number(e.target.value) }))}
                   />
                 </label>
               </div>
+
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-medium text-white/50">
+                    Style reference <span className="text-white/25">(до 5, только для ChatGPT)</span>
+                  </label>
+                  <label className={uploadLabelClass()}>
+                    <ImageIcon className="h-4 w-4 shrink-0" />
+                    <span className="truncate">
+                      {styleRefPreviews.length > 0 ? `${styleRefPreviews.length} reference(s)` : "Загрузить референс стиля…"}
+                    </span>
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp"
+                      multiple
+                      className="sr-only"
+                      onChange={(e) => {
+                        const files = Array.from(e.target.files ?? []).slice(0, 5);
+                        styleRefFilesRef.current = files;
+                        setStyleRefPreviews((prev) => {
+                          prev.forEach((u) => URL.revokeObjectURL(u));
+                          return files.map((f) => URL.createObjectURL(f));
+                        });
+                        setCopiedPrompt(false);
+                      }}
+                    />
+                  </label>
+                  {styleRefPreviews.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5">
+                      {styleRefPreviews.map((src, i) => (
+                        <img key={i} src={src} alt={`style ref ${i + 1}`} className="h-12 w-12 rounded-md border border-white/8 object-cover" />
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-medium text-white/50">
+                    Character reference <span className="text-white/25">(персонаж/человек)</span>
+                  </label>
+                  <label className={uploadLabelClass()}>
+                    <ImageIcon className="h-4 w-4 shrink-0" />
+                    <span className="truncate">{characterRefName || "Загрузить персонажа…"}</span>
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp"
+                      className="sr-only"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0] ?? null;
+                        characterRefFileRef.current = f;
+                        if (characterRefPreview) URL.revokeObjectURL(characterRefPreview);
+                        setCharacterRefPreview(f ? URL.createObjectURL(f) : null);
+                        setCharacterRefName(f?.name ?? "");
+                        setCopiedPrompt(false);
+                      }}
+                    />
+                  </label>
+                  {characterRefPreview && (
+                    <img src={characterRefPreview} alt="character reference" className="h-12 w-12 rounded-md border border-white/8 object-cover" />
+                  )}
+                </div>
+              </div>
+
               <label className="mt-4 block text-xs text-white/45">
-                Стиль / референс / персонаж для GPT Prompt Pack
+                Optional style notes <span className="text-white/25">(попадут в prompt pack)</span>
                 <textarea
                   className={`${fieldClass()} min-h-[80px]`}
-                  placeholder="Например: использовать мой прикреплённый портрет как главного персонажа; стиль — тёмный premium minimalism; акценты — синий/бирюзовый; без мелкого текста."
+                  placeholder="Дополнительные пожелания по стилю: цвета, настроение, типографика, что не делать."
                   value={settings.carouselStyleNotes ?? ""}
-                  onChange={(e) => setSettings((s) => ({ ...s, carouselStyleNotes: e.target.value }))}
+                  onChange={(e) => {
+                    setSettings((s) => ({ ...s, carouselStyleNotes: e.target.value }));
+                    setCopiedPrompt(false);
+                  }}
                 />
               </label>
               <label className="mt-4 block text-xs text-white/45">
@@ -592,7 +811,7 @@ export function SourceRewriterPipeline() {
           {rewritten.rewrittenCarouselPages?.length ? (
             <div className="space-y-5">
               <div className="rounded-xl border border-[#14b8a6]/20 bg-[#14b8a6]/5 p-3 text-sm text-white/75">
-                Готово: карусель разбита на страницы, первая страница — hook, последняя — CTA. Ниже готовый текст и визуальные ТЗ для каждого слайда.
+                Готово: карусель разбита на страницы, первая страница — hook, последняя — CTA. Prompt ниже пересобирается по структуре Instagram Carousel Remix и учитывает style/character reference.
               </div>
               {rewritten.rewrittenCarouselPages.map((p) => (
                 <div key={p.pageNumber} className="rounded-xl border border-white/8 bg-black/20 p-4">
@@ -611,13 +830,9 @@ export function SourceRewriterPipeline() {
                         const val = e.target.value;
                         setRewritten((prev) => {
                           if (!prev?.rewrittenCarouselPages) return prev;
-                          return {
-                            ...prev,
-                            rewrittenCarouselPages: prev.rewrittenCarouselPages.map((x) =>
-                              x.pageNumber === p.pageNumber ? { ...x, rewrittenText: val } : x
-                            ),
-                          };
+                          return { ...prev, rewrittenCarouselPages: prev.rewrittenCarouselPages.map((x) => x.pageNumber === p.pageNumber ? { ...x, rewrittenText: val } : x) };
                         });
+                        setCopiedPrompt(false);
                       }}
                     />
                   </label>
@@ -630,13 +845,9 @@ export function SourceRewriterPipeline() {
                         const val = e.target.value;
                         setRewritten((prev) => {
                           if (!prev?.rewrittenCarouselPages) return prev;
-                          return {
-                            ...prev,
-                            rewrittenCarouselPages: prev.rewrittenCarouselPages.map((x) =>
-                              x.pageNumber === p.pageNumber ? { ...x, visualPrompt: val } : x
-                            ),
-                          };
+                          return { ...prev, rewrittenCarouselPages: prev.rewrittenCarouselPages.map((x) => x.pageNumber === p.pageNumber ? { ...x, visualPrompt: val } : x) };
                         });
+                        setCopiedPrompt(false);
                       }}
                     />
                   </label>
@@ -647,9 +858,7 @@ export function SourceRewriterPipeline() {
                 <textarea
                   className={`${fieldClass()} min-h-[100px]`}
                   value={rewritten.rewrittenCaption ?? ""}
-                  onChange={(e) =>
-                    setRewritten((r) => (r ? { ...r, rewrittenCaption: e.target.value } : r))
-                  }
+                  onChange={(e) => setRewritten((r) => (r ? { ...r, rewrittenCaption: e.target.value } : r))}
                 />
               </label>
               <div className="rounded-xl border border-[#5b8def]/20 bg-[#5b8def]/5 p-4">
@@ -657,17 +866,27 @@ export function SourceRewriterPipeline() {
                   <div>
                     <p className="text-sm font-semibold text-[#9db9ff]">GPT Prompt Pack</p>
                     <p className="mt-1 text-xs text-white/45">
-                      Это готовый промпт для ChatGPT/генератора карусели. Сюда уже собраны тексты страниц, роли, визуальные ТЗ и стиль.
+                      При отправке этого промпта в ChatGPT прикрепи выбранные style reference и character reference изображения вручную.
                     </p>
                   </div>
                   <button type="button" onClick={copyCarouselPrompt} className={buttonClass("white")}>
                     <ClipboardCopy className="h-4 w-4" /> {copiedPrompt ? "Скопировано" : "Скопировать prompt"}
                   </button>
                 </div>
+                {(styleRefPreviews.length > 0 || characterRefPreview) && (
+                  <div className="mt-3 flex flex-wrap gap-1.5">
+                    {styleRefPreviews.map((src, i) => (
+                      <img key={`prompt-style-${i}`} src={src} alt={`prompt style ref ${i + 1}`} className="h-14 w-14 rounded-md border border-white/8 object-cover" />
+                    ))}
+                    {characterRefPreview && (
+                      <img src={characterRefPreview} alt="prompt character ref" className="h-14 w-14 rounded-md border border-[#5b8def]/30 object-cover" />
+                    )}
+                  </div>
+                )}
                 <textarea
                   readOnly
                   className={`${fieldClass(true)} mt-3 min-h-[220px] font-mono text-xs`}
-                  value={rewritten.carouselPromptPack ?? ""}
+                  value={getCurrentPromptPack()}
                 />
               </div>
             </div>
@@ -692,9 +911,7 @@ export function SourceRewriterPipeline() {
                       onChange={(e) =>
                         setRewritten((prev) => {
                           if (!prev?.rewrittenPages) return prev;
-                          const pages = prev.rewrittenPages.map((x) =>
-                            x.pageNumber === p.pageNumber ? { ...x, rewrittenText: e.target.value } : x
-                          );
+                          const pages = prev.rewrittenPages.map((x) => x.pageNumber === p.pageNumber ? { ...x, rewrittenText: e.target.value } : x);
                           return { ...prev, rewrittenPages: pages };
                         })
                       }
@@ -713,9 +930,7 @@ export function SourceRewriterPipeline() {
                       onChange={(e) =>
                         setRewritten((prev) => {
                           if (!prev?.rewrittenSlides) return prev;
-                          const slides = prev.rewrittenSlides.map((x) =>
-                            x.slideNumber === s.slideNumber ? { ...x, rewrittenText: e.target.value } : x
-                          );
+                          const slides = prev.rewrittenSlides.map((x) => x.slideNumber === s.slideNumber ? { ...x, rewrittenText: e.target.value } : x);
                           return { ...prev, rewrittenSlides: slides };
                         })
                       }
@@ -753,14 +968,14 @@ export function SourceRewriterPipeline() {
           <div className="mt-4 flex flex-wrap gap-2">
             <button type="button" onClick={copyAll} className={buttonClass("white")}>
               <ClipboardCopy className="h-4 w-4" />
-              {rewritten?.carouselPromptPack ? "Скопировать GPT prompt" : "Скопировать всё"}
+              {getCurrentPromptPack() ? "Скопировать GPT prompt" : "Скопировать всё"}
             </button>
             <button
               type="button"
               onClick={() => {
                 if (!rewritten) return;
-                const content = buildStructuredMarkdown(rewritten);
-                downloadBlob("source-rewriter-result.txt", content, "text/plain;charset=utf-8");
+                const prompt = getCurrentPromptPack();
+                downloadBlob("source-rewriter-result.txt", buildStructuredMarkdown(rewritten, prompt), "text/plain;charset=utf-8");
               }}
               className={buttonClass("white")}
             >
@@ -770,7 +985,8 @@ export function SourceRewriterPipeline() {
               type="button"
               onClick={() => {
                 if (!rewritten) return;
-                downloadBlob("source-rewriter-result.md", buildStructuredMarkdown(rewritten), "text/markdown;charset=utf-8");
+                const prompt = getCurrentPromptPack();
+                downloadBlob("source-rewriter-result.md", buildStructuredMarkdown(rewritten, prompt), "text/markdown;charset=utf-8");
               }}
               className={buttonClass("white")}
             >
@@ -780,7 +996,7 @@ export function SourceRewriterPipeline() {
               type="button"
               onClick={() => {
                 if (!rewritten) return;
-                downloadBlob("source-rewriter-result.json", JSON.stringify(rewritten, null, 2), "application/json");
+                downloadBlob("source-rewriter-result.json", JSON.stringify({ ...rewritten, carouselPromptPack: getCurrentPromptPack() }, null, 2), "application/json");
               }}
               className={buttonClass("white")}
             >
