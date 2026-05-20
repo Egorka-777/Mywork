@@ -80,11 +80,25 @@ export type PlagiarismSafety =
   | "strong_uniqueness"
   | "maximum_uniqueness_without_losing_meaning";
 
+export type CarouselPageRole = "hook" | "content" | "cta";
+
+export type RewrittenCarouselPage = {
+  pageNumber: number;
+  role: CarouselPageRole;
+  rewrittenText: string;
+  visualPrompt: string;
+  notes: string[];
+};
+
 export type RewriteSettings = {
   rewriteMode: RewriteMode;
   outputLength: OutputLength;
   styleIntensity: StyleIntensity;
   plagiarismSafety: PlagiarismSafety;
+  carouselSlideCount?: number;
+  carouselMaxCharsPerSlide?: number;
+  carouselStyleNotes?: string;
+  carouselCtaText?: string;
 };
 
 export type RewrittenSource = {
@@ -105,5 +119,8 @@ export type RewrittenSource = {
     layoutNotes: string;
   }[];
   rewrittenTranscript?: string;
+  rewrittenCarouselPages?: RewrittenCarouselPage[];
+  rewrittenCaption?: string;
+  carouselPromptPack?: string;
   notes: string[];
 };
