@@ -21,17 +21,28 @@ const LOG_ENTRY_TYPES = [
 
 const MESSAGE_ROLES = ["user", "assistant"] as const;
 
+export type BrainAgentConfig = {
+  key: string;
+  name: string;
+  role: string;
+  modelEnv: string;
+  promptFile?: string;
+  promptPath?: string;
+  systemPrompt?: string;
+};
+
 export type BrainAgent = {
   key: string;
   name: string;
   role: string;
   modelEnv: string;
+  promptFile?: string;
   systemPrompt: string;
 };
 
 export type BrainAgentsFile = {
   version: number;
-  agents: BrainAgent[];
+  agents: BrainAgentConfig[];
 };
 
 export type BrainState = Record<string, unknown>;
@@ -111,9 +122,7 @@ async function readJsonlFile<T>(filePath: string): Promise<T[]> {
     raw = await fs.readFile(filePath, "utf-8");
   } catch (e) {
     const err = e as NodeJS.ErrnoException;
-    if (err.code === "ENOENT") {
-      return [];
-    }
+    if (err.code === "ENOENT") return [];
     throw e;
   }
 
@@ -145,13 +154,67 @@ function conversationPathForAgent(agentKey: string): string {
   return path.join(CONVERSATIONS_DIR, `${agentKey}.jsonl`);
 }
 
+function resolvePromptFile(rawPath: string): string {
+  const promptFile = assertNonEmptyString(rawPath, "promptFile");
+  if (path.isAbsolute(promptFile)) {
+    throw new Error(`agents.json: promptFile must be relative inside data/brain: ${promptFile}`);
+  }
+  if (promptFile.includes("..") || promptFile.includes("\\")) {
+    throw new Error(`agents.json: invalid promptFile path: ${promptFile}`);
+  }
+  if (!/^prompts\/[a-z0-9_\-]+\.md$/i.test(promptFile)) {
+    throw new Error(`agents.json: promptFile must match prompts/<name>.md: ${promptFile}`);
+  }
+
+  const resolved = path.resolve(BRAIN_DIR, promptFile);
+  const rel = path.relative(BRAIN_DIR, resolved);
+  if (rel.startsWith("..") || path.isAbsolute(rel)) {
+    throw new Error(`agents.json: promptFile escapes data/brain: ${promptFile}`);
+  }
+  return resolved;
+}
+
+async function readPromptForAgent(agent: BrainAgentConfig): Promise<{ promptFile?: string; systemPrompt: string }> {
+  const promptFile = agent.promptFile ?? agent.promptPath;
+  if (promptFile) {
+    const promptPath = resolvePromptFile(promptFile);
+    let raw: string;
+    try {
+      raw = await fs.readFile(promptPath, "utf-8");
+    } catch (e) {
+      const err = e as NodeJS.ErrnoException;
+      if (err.code === "ENOENT") {
+        throw new Error(`Missing prompt file for agent ${agent.key}: ${promptFile}`);
+      }
+      throw e;
+    }
+    const systemPrompt = raw.trim();
+    if (!systemPrompt) throw new Error(`Empty prompt file for agent ${agent.key}: ${promptFile}`);
+    return { promptFile, systemPrompt };
+  }
+
+  const systemPrompt = agent.systemPrompt?.trim();
+  if (!systemPrompt) {
+    throw new Error(`agents.json: agent ${agent.key} must define promptFile or systemPrompt`);
+  }
+  return { systemPrompt };
+}
+
+function validateAgentConfig(agent: BrainAgentConfig): void {
+  assertNonEmptyString(agent.key, "agent.key");
+  assertNonEmptyString(agent.name, `agent ${agent.key}.name`);
+  assertNonEmptyString(agent.role, `agent ${agent.key}.role`);
+  assertNonEmptyString(agent.modelEnv, `agent ${agent.key}.modelEnv`);
+  if (agent.key.includes("..") || agent.key.includes("/") || agent.key.includes("\\")) {
+    throw new Error(`Invalid agent key: ${agent.key}`);
+  }
+}
+
 export async function readBrainState(): Promise<BrainState> {
   return readJsonFile<BrainState>(STATE_PATH);
 }
 
-export async function patchBrainState(
-  patch: Record<string, unknown>
-): Promise<BrainState> {
+export async function patchBrainState(patch: Record<string, unknown>): Promise<BrainState> {
   const currentState = await readBrainState();
   const nextState: BrainState = {
     ...currentState,
@@ -162,17 +225,13 @@ export async function patchBrainState(
   return nextState;
 }
 
-export async function readBrainLog(
-  options?: ReadJsonlOptions
-): Promise<BrainLogEntry[]> {
+export async function readBrainLog(options?: ReadJsonlOptions): Promise<BrainLogEntry[]> {
   const limit = options?.limit ?? 100;
   const entries = await readJsonlFile<BrainLogEntry>(LOG_PATH);
   return takeLast(entries, limit);
 }
 
-export async function appendBrainLog(
-  input: BrainLogEntryInput
-): Promise<BrainLogEntry> {
+export async function appendBrainLog(input: BrainLogEntryInput): Promise<BrainLogEntry> {
   await getAgentByKey(input.agentKey);
   const entryType = validateEntryType(input.entryType);
   const title = assertNonEmptyString(input.title, "title");
@@ -198,7 +257,24 @@ export async function listAgents(): Promise<BrainAgent[]> {
   if (!Array.isArray(data.agents)) {
     throw new Error("agents.json: agents must be an array");
   }
-  return data.agents;
+
+  const agents: BrainAgent[] = [];
+  const seen = new Set<string>();
+  for (const agent of data.agents) {
+    validateAgentConfig(agent);
+    if (seen.has(agent.key)) throw new Error(`agents.json: duplicate agent key: ${agent.key}`);
+    seen.add(agent.key);
+    const prompt = await readPromptForAgent(agent);
+    agents.push({
+      key: agent.key,
+      name: agent.name,
+      role: agent.role,
+      modelEnv: agent.modelEnv,
+      promptFile: prompt.promptFile,
+      systemPrompt: prompt.systemPrompt,
+    });
+  }
+  return agents;
 }
 
 export async function getAgentByKey(agentKey: string): Promise<BrainAgent> {
@@ -209,16 +285,11 @@ export async function getAgentByKey(agentKey: string): Promise<BrainAgent> {
 
   const agents = await listAgents();
   const agent = agents.find((a) => a.key === key);
-  if (!agent) {
-    throw new Error(`Unknown agent key: ${agentKey}`);
-  }
+  if (!agent) throw new Error(`Unknown agent key: ${agentKey}`);
   return agent;
 }
 
-export async function listAgentMessages(
-  agentKey: string,
-  options?: ReadJsonlOptions
-): Promise<BrainMessage[]> {
+export async function listAgentMessages(agentKey: string, options?: ReadJsonlOptions): Promise<BrainMessage[]> {
   const agent = await getAgentByKey(agentKey);
   const limit = options?.limit ?? 50;
   const filePath = conversationPathForAgent(agent.key);
@@ -289,9 +360,7 @@ export function renderStateForAgent(state: BrainState): string {
     if (notes.length === 0) {
       lines.push("- none");
     } else {
-      for (const note of notes) {
-        lines.push(`- ${typeof note === "string" ? note : String(note)}`);
-      }
+      for (const note of notes) lines.push(`- ${typeof note === "string" ? note : String(note)}`);
     }
   } else {
     lines.push("- not set");
