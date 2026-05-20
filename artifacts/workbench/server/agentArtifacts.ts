@@ -140,6 +140,20 @@ function safeStructuredData(value: unknown): Record<string, unknown> | undefined
   };
 }
 
+function tryParseStructuredData(raw: string): Record<string, unknown> | undefined {
+  const text = raw.trim();
+  if (!text) return undefined;
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    return safeStructuredData(parsed);
+  } catch {
+    return {
+      parseWarning: "Embedded structuredData was not valid JSON after truncation or formatting.",
+      preview: text.slice(0, MAX_STRUCTURED_JSON_LENGTH),
+    };
+  }
+}
+
 export function makeWorkflowArtifact(input: {
   id: string;
   type: WorkflowArtifactType;
@@ -165,23 +179,77 @@ export function makeWorkflowArtifact(input: {
   };
 }
 
+function readSingleLineField(block: string, field: string): string {
+  const re = new RegExp(`^${field}:\\s*(.*)$`, "im");
+  return block.match(re)?.[1]?.trim() ?? "";
+}
+
+function readMultilineField(block: string, field: "textContent" | "structuredData"): string {
+  const startToken = `\n${field}:\n`;
+  const start = block.indexOf(startToken);
+  if (start === -1) return "";
+  const contentStart = start + startToken.length;
+  const nextText = field === "structuredData" ? -1 : block.indexOf("\nstructuredData:\n", contentStart);
+  const nextArtifact = block.indexOf("\nARTIFACT:", contentStart);
+  const stops = [nextText, nextArtifact].filter((n) => n !== -1);
+  const end = stops.length > 0 ? Math.min(...stops) : block.length;
+  return block.slice(contentStart, end).trim();
+}
+
+export function extractEmbeddedArtifactsFromText(text: string): WorkflowArtifact[] {
+  if (!text.includes("ARTIFACT:")) return [];
+  const parts = text.split(/\nARTIFACT:\s*/).slice(1);
+  const artifacts: WorkflowArtifact[] = [];
+
+  for (let index = 0; index < parts.length; index += 1) {
+    const block = `ARTIFACT: ${parts[index]}`;
+    const title = block.match(/^ARTIFACT:\s*(.*)$/m)?.[1]?.trim() || "Embedded artifact";
+    const type = normalizeArtifactType(readSingleLineField(block, "type"));
+    const source = normalizeArtifactSource(readSingleLineField(block, "source"));
+    const sourceUrlRaw = readSingleLineField(block, "url");
+    const sourceUrl = sourceUrlRaw && parseSafeUrl(sourceUrlRaw) ? cleanUrl(sourceUrlRaw) : undefined;
+    const summary = readSingleLineField(block, "summary") || "Embedded artifact from Agents Hub prepared request.";
+    const textContent = readMultilineField(block, "textContent");
+    const structuredRaw = readMultilineField(block, "structuredData");
+
+    artifacts.push(makeWorkflowArtifact({
+      id: `embedded-artifact-${index + 1}`,
+      type,
+      source,
+      sourceUrl,
+      title,
+      summary,
+      textContent: textContent || undefined,
+      structuredData: tryParseStructuredData(structuredRaw),
+    }));
+  }
+
+  return artifacts;
+}
+
 export function buildArtifactsFromUserRequest(userRequest: string): WorkflowArtifact[] {
   const now = new Date().toISOString();
-  return extractUrlsFromText(userRequest).map((url, index) => {
-    const type = classifyUrl(url);
-    return makeWorkflowArtifact({
-      id: `request-url-${index + 1}`,
-      type,
-      source: "user_request",
-      sourceUrl: url,
-      summary: summaryForUrl(type, url),
-      structuredData: {
-        url,
+  const embeddedArtifacts = extractEmbeddedArtifactsFromText(userRequest);
+  const embeddedUrls = new Set(embeddedArtifacts.map((artifact) => artifact.sourceUrl).filter((url): url is string => Boolean(url)));
+  const urlArtifacts = extractUrlsFromText(userRequest)
+    .filter((url) => !embeddedUrls.has(url))
+    .map((url, index) => {
+      const type = classifyUrl(url);
+      return makeWorkflowArtifact({
+        id: `request-url-${index + 1}`,
         type,
-      },
-      createdAt: now,
+        source: "user_request",
+        sourceUrl: url,
+        summary: summaryForUrl(type, url),
+        structuredData: {
+          url,
+          type,
+        },
+        createdAt: now,
+      });
     });
-  });
+
+  return [...embeddedArtifacts, ...urlArtifacts];
 }
 
 export function sanitizeWorkflowArtifacts(input: unknown): WorkflowArtifact[] {
