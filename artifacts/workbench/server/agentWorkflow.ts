@@ -2,6 +2,12 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import type { WorkflowArtifact } from "./agentArtifacts";
+import {
+  buildArtifactsFromUserRequest,
+  hasArtifactType,
+  summarizeArtifactsForWorkflow,
+} from "./agentArtifacts";
 import type { BrainAgent, BrainLogEntry, BrainState } from "./brain";
 import {
   getAgentByKey,
@@ -95,6 +101,7 @@ export type AgentWorkflow = {
   userRequest: string;
   ceoPlan: string | null;
   sharedContextSnapshot: string | null;
+  artifacts: WorkflowArtifact[];
   steps: AgentWorkflowStep[];
   memoryEvents: WorkflowMemoryEvent[];
   activityLog: ActivityEntry[];
@@ -145,7 +152,7 @@ export type WorkflowOnEvent = (event: WorkflowLiveEvent) => void;
 const WORKFLOW_PROTOCOL = `
 
 WORKFLOW PROTOCOL:
-Ты участвуешь в многошаговой задаче. Ты видишь shared context: исходный запрос, план Chief, предыдущие outputs.
+Ты участвуешь в многошаговой задаче. Ты видишь shared context: исходный запрос, входные артефакты, план Chief, предыдущие outputs.
 Делай только свою роль. Не повторяй то, что уже сделал другой шаг.
 
 ЗАПРЕЩЕНО КАТЕГОРИЧЕСКИ:
@@ -153,6 +160,10 @@ WORKFLOW PROTOCOL:
 - Давать задачи типа "запустить агента X", "использовать систему Y", "открыть Agents Hub", "вызвать цепочку".
 - Писать задачи для системы вместо результата для Егора.
 - Использовать Markdown-заголовки ## и жирный Markdown **.
+- Выдумывать содержимое файла, карусели, аккаунта или ссылки, если в shared context нет извлечённых данных.
+
+ЕСЛИ ДАННЫХ НЕДОСТАТОЧНО:
+Напиши, что не подтверждено, и укажи, какие данные нужны. Не притворяйся, что ты видел файл/страницу/профиль, если в artifacts нет extracted data.
 
 ФОРМАТ ОТВЕТА:
 Пиши обычным текстом. Каждый ответ содержит:
@@ -214,17 +225,28 @@ function toWorkflowAgentKey(key: string): WorkflowAgentKey {
   return key;
 }
 
-export function selectPrimaryAgent(userRequest: string): WorkflowAgentKey {
+function isInstagramAccountAnalysisRequest(userRequest: string): boolean {
+  return (
+    /(анализ|разбор|проверь|оцени).{0,80}(instagram|инстаграм|аккаунт|профил)/i.test(userRequest) ||
+    /(instagram|инстаграм).{0,80}(аккаунт|профил)/i.test(userRequest)
+  );
+}
+
+export function selectPrimaryAgent(userRequest: string, artifacts: WorkflowArtifact[] = []): WorkflowAgentKey {
   const q = userRequest.toLowerCase();
 
-  const content = /контент|пост|карусел|reels|рилс|сторис|threads|telegram|тикток|tiktok|vk|ютуб|youtube|публикац|cta|хук|hook|слайд|caption|подпись/i;
-  if (content.test(q)) return "content_maker";
-
-  const marketing = /оффер|продаж|воронк|заявк|лид|продукт|цен|подписк|оплат|конверс|клиент|лид-магнит|монетизац/i;
-  if (marketing.test(q)) return "marketer";
+  if (hasArtifactType(artifacts, "instagram_profile_url") || isInstagramAccountAnalysisRequest(userRequest)) {
+    return "analyst";
+  }
 
   const analysis = /анализ|разбор|конкурент|рынок|тренд|механик|гипотез|данн|метрик|исслед/i;
   if (analysis.test(q)) return "analyst";
+
+  const content = /контент|пост|карусел|reels|рилс|сторис|threads|telegram|тикток|tiktok|vk|ютуб|youtube|публикац|cta|хук|hook|слайд|caption|подпись/i;
+  if (content.test(q) || hasArtifactType(artifacts, "instagram_post_url")) return "content_maker";
+
+  const marketing = /оффер|продаж|воронк|заявк|лид|продукт|цен|подписк|оплат|конверс|клиент|лид-магнит|монетизац/i;
+  if (marketing.test(q)) return "marketer";
 
   const copy = /перепиши|текст|стиль|живее|рерайт|формулировк|заголовок|копирайт|редактур/i;
   if (copy.test(q)) return "copywriter";
@@ -275,6 +297,9 @@ export function buildSharedWorkflowContext(input: {
   lines.push("", "=== ORIGINAL USER REQUEST ===");
   lines.push(workflow.userRequest || "not set");
 
+  lines.push("", "=== INPUT ARTIFACTS ===");
+  lines.push(summarizeArtifactsForWorkflow(workflow.artifacts ?? []));
+
   lines.push("", "=== CHIEF PLAN ===");
   lines.push(workflow.ceoPlan?.trim() || "not set");
 
@@ -323,6 +348,7 @@ export async function readWorkflow(workflowId: string): Promise<AgentWorkflow> {
   try {
     const raw = await fs.readFile(workflowPath(workflowId), "utf-8");
     const workflow = JSON.parse(raw) as AgentWorkflow;
+    workflow.artifacts = workflow.artifacts ?? [];
     workflow.steps = (workflow.steps ?? []).filter((step) => isWorkflowAgentKey(step.agentKey));
     return workflow;
   } catch (e) {
@@ -369,6 +395,7 @@ export async function createWorkflowDraft(input: CreateWorkflowPlanInput): Promi
     userRequest: input.userRequest.trim(),
     ceoPlan: null,
     sharedContextSnapshot: null,
+    artifacts: [],
     steps: [],
     memoryEvents: [],
     activityLog: [],
@@ -420,13 +447,18 @@ function pushMemory(workflow: AgentWorkflow, agentKey: WorkflowAgentKey, type: W
   });
 }
 
-function buildContentWorkflowSteps(): AgentWorkflowStep[] {
+function buildContentWorkflowSteps(artifacts: WorkflowArtifact[]): AgentWorkflowStep[] {
+  const hasInstagramPost = hasArtifactType(artifacts, "instagram_post_url");
+  const sourceNote = hasInstagramPost
+    ? "Во входных артефактах есть Instagram post/reel URL. На этом проходе URL только классифицирован; если нет extracted slides/OCR в INPUT ARTIFACTS, не делай вид, что видел слайды. Попроси выполнить tool extraction в следующем проходе или работай только с подтверждёнными данными."
+    : "Используй только подтверждённые данные из запроса и INPUT ARTIFACTS.";
+
   return [
     newStep(
       "chief",
       null,
       "Поставить задачу и критерий готовности",
-      "Определи формат, аудиторию, цель карусели, CTA и критерий готового результата. Не пиши финальный контент. Дай жёсткую рамку для следующих шагов."
+      `${sourceNote}\nОпредели формат, аудиторию, цель карусели/контента, CTA и критерий готового результата. Не пиши финальный контент. Дай жёсткую рамку для следующих шагов.`
     ),
     newStep(
       "marketer",
@@ -438,7 +470,7 @@ function buildContentWorkflowSteps(): AgentWorkflowStep[] {
       "content_maker",
       null,
       "Сценарий карусели",
-      "Сделай готовые тексты 7–10 слайдов. Запрещено писать скелет вида 'слайды 2–3: проблема'. Каждый слайд должен иметь финальный текст, который можно сразу ставить на изображение. Обязательный формат: Слайд 1: <текст>; Слайд 2: <текст>; ... Последний слайд должен содержать CTA из исходного запроса."
+      "Сделай готовые тексты 7–10 слайдов. Запрещено писать скелет вида 'слайды 2–3: проблема'. Каждый слайд должен иметь финальный текст, который можно сразу ставить на изображение. Обязательный формат: Слайд 1: <текст>; Слайд 2: <текст>; ... Последний слайд должен содержать CTA из исходного запроса. Если для работы нужен текст из слайдов, но он не извлечён в INPUT ARTIFACTS, прямо напиши, что OCR/анализ слайдов не выполнен."
     ),
     newStep(
       "copywriter",
@@ -451,6 +483,35 @@ function buildContentWorkflowSteps(): AgentWorkflowStep[] {
       null,
       "Финальная сборка",
       "Собери финальный результат: готовая карусель по слайдам, caption, CTA, короткая инструкция что публиковать. Не скрывай, если какие-то данные не подтверждены."
+    ),
+  ];
+}
+
+function buildInstagramProfileAnalysisWorkflowSteps(): AgentWorkflowStep[] {
+  return [
+    newStep(
+      "chief",
+      null,
+      "Поставить задачу анализа аккаунта",
+      "Во входных артефактах есть Instagram profile URL или запрос на анализ аккаунта. Зафиксируй, что это анализ профиля/аккаунта, а не задача сделать карусель. Укажи критерии анализа: позиционирование, контент, оффер, воронка, CTA, что не подтверждено без выгрузки постов."
+    ),
+    newStep(
+      "analyst",
+      null,
+      "Анализ Instagram-аккаунта",
+      "Сделай анализ только по подтверждённым данным из запроса и INPUT ARTIFACTS. Если в INPUT ARTIFACTS есть только ссылка без выгруженных постов/био/метрик — прямо напиши, что содержимое аккаунта не извлечено, и дай чек-лист точного анализа после подключения profile scraper. Не придумывай посты, метрики и аудиторию."
+    ),
+    newStep(
+      "marketer",
+      null,
+      "Маркетинговые выводы по аккаунту",
+      "На базе вывода аналитика дай практические рекомендации: позиционирование, оффер, CTA, лид-магнит, какие блоки нужно проверить после выгрузки аккаунта. Не превращай это в карусель."
+    ),
+    newStep(
+      "chief",
+      null,
+      "Финальная сборка анализа",
+      "Собери финальный ответ: что подтверждено, что не подтверждено, какие данные нужны, какие действия сделать дальше. Не выдавай выдуманный анализ аккаунта за факт."
     ),
   ];
 }
@@ -481,12 +542,16 @@ function buildDefaultWorkflowSteps(): AgentWorkflowStep[] {
   ];
 }
 
-function buildWorkflowSteps(userRequest: string): AgentWorkflowStep[] {
-  const primary = selectPrimaryAgent(userRequest);
+function buildWorkflowSteps(userRequest: string, artifacts: WorkflowArtifact[]): AgentWorkflowStep[] {
+  const primary = selectPrimaryAgent(userRequest, artifacts);
+  if (hasArtifactType(artifacts, "instagram_profile_url") || isInstagramAccountAnalysisRequest(userRequest)) {
+    return buildInstagramProfileAnalysisWorkflowSteps();
+  }
+
   switch (primary) {
     case "content_maker":
     case "copywriter":
-      return buildContentWorkflowSteps();
+      return buildContentWorkflowSteps(artifacts);
     case "marketer":
       return buildMarketingWorkflowSteps();
     case "analyst":
@@ -512,8 +577,10 @@ export async function createWorkflowPlan(input: {
   const brainLogEntries = await readBrainLog({ limit: 10 });
   const agents = await listAgents();
   const chiefAgent = await getAgentByKey("chief");
+  const artifacts = buildArtifactsFromUserRequest(userRequest);
 
   const draft = await createWorkflowDraft({ title, userRequest });
+  draft.artifacts = artifacts;
 
   const preContext = buildSharedWorkflowContext({
     workflow: { ...draft, ceoPlan: "(pending)", steps: [] },
@@ -522,7 +589,7 @@ export async function createWorkflowPlan(input: {
     agents,
   });
 
-  const chiefUser = `Заголовок задачи: ${title}\n\nЗапрос Егора:\n${userRequest}\n\nСформируй чёткий план: цель, критерии готовности, риски, порядок шагов для команды агентов. Пиши по-русски.`;
+  const chiefUser = `Заголовок задачи: ${title}\n\nЗапрос Егора:\n${userRequest}\n\nВходные артефакты:\n${summarizeArtifactsForWorkflow(artifacts)}\n\nСформируй чёткий план: цель, критерии готовности, риски, порядок шагов для команды агентов. Пиши по-русски. Если данных по ссылке/файлу нет, не придумывай их.`;
   const chiefSystem = chiefAgent.systemPrompt + WORKFLOW_PROTOCOL + "\n\n--- SHARED CONTEXT ---\n" + preContext;
 
   const chiefPlan = await input.llm.complete({ model: input.ceoModel, system: chiefSystem, user: chiefUser });
@@ -532,7 +599,7 @@ export async function createWorkflowPlan(input: {
     buildSharedWorkflowContext({ workflow: { ...draft, steps: [] }, brainState, brainLogEntries, agents }),
     8000
   );
-  draft.steps = buildWorkflowSteps(userRequest);
+  draft.steps = buildWorkflowSteps(userRequest, artifacts);
   draft.status = "planned";
   draft.memoryEvents = [];
   pushMemory(draft, "chief", "plan", "Chief plan", draft.ceoPlan);
@@ -574,6 +641,7 @@ export async function runWorkflow(input: { workflowId: string; llm: WorkflowOpen
   const brainLogEntries = await readBrainLog({ limit: 10 });
   const agents = await listAgents();
 
+  workflow.artifacts = workflow.artifacts ?? [];
   workflow.activityLog = workflow.activityLog ?? [];
   workflow.currentActivity = null;
   workflow.status = "running";
@@ -635,7 +703,7 @@ export async function runWorkflow(input: { workflowId: string; llm: WorkflowOpen
         const userBlock =
           `Шаг: ${step.title}\n\nИнструкция шага:\n${step.instruction}\n\n` +
           (extra ? `Дополнительно:\n${extra}\n\n` : "") +
-          `Исходный запрос пользователя:\n${workflow.userRequest}`;
+          `Исходный запрос пользователя:\n${workflow.userRequest}\n\nВходные артефакты:\n${summarizeArtifactsForWorkflow(workflow.artifacts ?? [])}`;
 
         workflow.currentActivity = `${agentLabel} думает и пишет ответ…`;
         await saveWorkflow(workflow);
