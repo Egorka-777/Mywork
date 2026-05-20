@@ -2,6 +2,12 @@ export type WorkflowArtifactType =
   | "plain_url"
   | "instagram_profile_url"
   | "instagram_post_url"
+  | "instagram_carousel_analysis"
+  | "instagram_profile_snapshot"
+  | "extracted_source"
+  | "style_reference"
+  | "character_reference"
+  | "tool_warning"
   | "unknown";
 
 export type WorkflowArtifact = {
@@ -63,6 +69,18 @@ function titleForType(type: WorkflowArtifactType): string {
       return "Instagram profile URL";
     case "instagram_post_url":
       return "Instagram post/reel URL";
+    case "instagram_carousel_analysis":
+      return "Instagram carousel analysis";
+    case "instagram_profile_snapshot":
+      return "Instagram profile snapshot";
+    case "extracted_source":
+      return "Extracted source file";
+    case "style_reference":
+      return "Style reference";
+    case "character_reference":
+      return "Character reference";
+    case "tool_warning":
+      return "Tool warning";
     case "plain_url":
       return "URL";
     default:
@@ -75,7 +93,7 @@ function summaryForUrl(type: WorkflowArtifactType, url: string): string {
     case "instagram_profile_url":
       return `Detected Instagram profile URL. Route this as profile/account analysis, not carousel generation: ${url}`;
     case "instagram_post_url":
-      return `Detected Instagram post/reel URL. This can be processed by carousel import/analyze tools in the next tool-router pass: ${url}`;
+      return `Detected Instagram post/reel URL. This can be processed by carousel import/analyze tools: ${url}`;
     case "plain_url":
       return `Detected generic URL: ${url}`;
     default:
@@ -83,23 +101,46 @@ function summaryForUrl(type: WorkflowArtifactType, url: string): string {
   }
 }
 
+export function makeWorkflowArtifact(input: {
+  id: string;
+  type: WorkflowArtifactType;
+  source: WorkflowArtifact["source"];
+  title?: string;
+  summary: string;
+  sourceUrl?: string;
+  textContent?: string;
+  structuredData?: Record<string, unknown>;
+  createdAt?: string;
+}): WorkflowArtifact {
+  return {
+    id: input.id,
+    type: input.type,
+    source: input.source,
+    title: input.title ?? titleForType(input.type),
+    summary: input.summary,
+    sourceUrl: input.sourceUrl,
+    textContent: input.textContent,
+    structuredData: input.structuredData,
+    createdAt: input.createdAt ?? new Date().toISOString(),
+  };
+}
+
 export function buildArtifactsFromUserRequest(userRequest: string): WorkflowArtifact[] {
   const now = new Date().toISOString();
   return extractUrlsFromText(userRequest).map((url, index) => {
     const type = classifyUrl(url);
-    return {
+    return makeWorkflowArtifact({
       id: `request-url-${index + 1}`,
       type,
       source: "user_request",
       sourceUrl: url,
-      title: titleForType(type),
       summary: summaryForUrl(type, url),
       structuredData: {
         url,
         type,
       },
       createdAt: now,
-    };
+    });
   });
 }
 
@@ -114,7 +155,8 @@ export function summarizeArtifactsForWorkflow(artifacts: WorkflowArtifact[]): st
       ];
       if (artifact.sourceUrl) lines.push(`url: ${artifact.sourceUrl}`);
       lines.push(`summary: ${artifact.summary}`);
-      if (artifact.textContent?.trim()) lines.push(`text: ${artifact.textContent.slice(0, 3000)}`);
+      if (artifact.textContent?.trim()) lines.push(`text: ${artifact.textContent.slice(0, 12000)}`);
+      if (artifact.structuredData) lines.push(`structuredData: ${JSON.stringify(artifact.structuredData).slice(0, 12000)}`);
       return lines.join("\n");
     })
     .join("\n\n");
