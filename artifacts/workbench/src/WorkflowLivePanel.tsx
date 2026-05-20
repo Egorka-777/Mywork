@@ -8,35 +8,33 @@ import {
 } from "./brainApi";
 
 const AGENT_COLORS: Record<string, { bubble: string; name: string; dot: string }> = {
-  ceo:              { bubble: "bg-cyan-950/60 border-cyan-500/25",    name: "text-cyan-300",   dot: "bg-cyan-400"   },
-  operations:       { bubble: "bg-violet-950/60 border-violet-500/25", name: "text-violet-300", dot: "bg-violet-400" },
-  funnel:           { bubble: "bg-amber-950/60 border-amber-500/25",   name: "text-amber-300",  dot: "bg-amber-400"  },
-  content_strategy: { bubble: "bg-emerald-950/60 border-emerald-500/25", name: "text-emerald-300", dot: "bg-emerald-400" },
-  rewriter:         { bubble: "bg-pink-950/60 border-pink-500/25",     name: "text-pink-300",   dot: "bg-pink-400"   },
-  tech_architect:   { bubble: "bg-sky-950/60 border-sky-500/25",       name: "text-sky-300",    dot: "bg-sky-400"    },
-  system:           { bubble: "bg-white/[0.04] border-white/10",       name: "text-slate-400",  dot: "bg-slate-400"  },
+  chief: { bubble: "bg-cyan-950/60 border-cyan-500/25", name: "text-cyan-300", dot: "bg-cyan-400" },
+  marketer: { bubble: "bg-amber-950/60 border-amber-500/25", name: "text-amber-300", dot: "bg-amber-400" },
+  content_maker: { bubble: "bg-emerald-950/60 border-emerald-500/25", name: "text-emerald-300", dot: "bg-emerald-400" },
+  analyst: { bubble: "bg-violet-950/60 border-violet-500/25", name: "text-violet-300", dot: "bg-violet-400" },
+  copywriter: { bubble: "bg-pink-950/60 border-pink-500/25", name: "text-pink-300", dot: "bg-pink-400" },
+  system: { bubble: "bg-white/[0.04] border-white/10", name: "text-slate-400", dot: "bg-slate-400" },
 };
 
 const AGENT_LABELS: Record<string, string> = {
-  ceo: "CEO",
-  operations: "Operations",
-  funnel: "Funnel",
-  content_strategy: "Контент",
-  rewriter: "Rewriter",
-  tech_architect: "Tech Arch",
+  chief: "Chief",
+  marketer: "Marketer",
+  content_maker: "Content Maker",
+  analyst: "Analyst",
+  copywriter: "Copywriter",
   system: "Система",
 };
 
 const PHASE_ICONS: Record<string, string> = {
-  system:   "▶",
-  reading:  "📖",
+  system: "▶",
+  reading: "📖",
   thinking: "💭",
-  output:   "💬",
-  sending:  "→",
-  review:   "🔍",
+  output: "💬",
+  sending: "→",
+  review: "🔍",
   revision: "🔄",
-  done:     "✓",
-  error:    "✗",
+  done: "✓",
+  error: "✗",
 };
 
 function agentStyle(key: string) {
@@ -199,9 +197,7 @@ export function WorkflowLivePanel({ onClose }: WorkflowLivePanelProps) {
           </header>
 
           <div className="grid gap-6 p-5 md:grid-cols-[minmax(280px,320px)_1fr]">
-            {/* ─── Left sidebar ─────────────────────────────────── */}
             <aside className="flex flex-col gap-4">
-              {/* New task form */}
               <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
                 <h3 className="mb-3 text-sm font-semibold text-white">Новая задача</h3>
                 {error ? (
@@ -261,17 +257,15 @@ export function WorkflowLivePanel({ onClose }: WorkflowLivePanelProps) {
                 </div>
               </div>
 
-              {/* CEO plan */}
               {activeWorkflow?.ceoPlan ? (
                 <div className="rounded-2xl border border-cyan-500/20 bg-cyan-950/20 p-4">
-                  <p className="mb-2 text-xs font-semibold text-cyan-300">📋 План CEO</p>
+                  <p className="mb-2 text-xs font-semibold text-cyan-300">📋 План Chief</p>
                   <pre className="max-h-40 overflow-y-auto whitespace-pre-wrap text-xs text-slate-200">
                     {activeWorkflow.ceoPlan}
                   </pre>
                 </div>
               ) : null}
 
-              {/* Steps */}
               {activeWorkflow && activeWorkflow.steps.length > 0 ? (
                 <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
                   <p className="mb-2 text-xs font-semibold text-slate-400">
@@ -279,39 +273,24 @@ export function WorkflowLivePanel({ onClose }: WorkflowLivePanelProps) {
                   </p>
                   <ul className="space-y-1.5">
                     {activeWorkflow.steps.map((step, i) => {
-                      const isActive =
-                        step.status === "running" || step.status === "reviewing";
+                      const isActive = step.status === "running" || step.status === "reviewing";
                       const isDone = step.status === "completed";
-                      const isFailed =
-                        step.status === "failed" ||
-                        step.status === "revision_required";
+                      const isFailed = step.status === "failed" || step.status === "revision_required";
                       const st = agentStyle(step.agentKey);
                       return (
                         <li key={step.id}>
                           <button
                             type="button"
-                            onClick={() =>
-                              setExpandedStep(
-                                expandedStep === step.id ? null : step.id
-                              )
-                            }
+                            onClick={() => setExpandedStep(expandedStep === step.id ? null : step.id)}
                             className="w-full rounded-lg border border-white/10 bg-black/10 px-2 py-1.5 text-left transition hover:bg-white/5"
                           >
                             <div className="flex items-center gap-2">
                               <span
                                 className={`h-2 w-2 shrink-0 rounded-full ${
-                                  isActive
-                                    ? `${st.dot} animate-pulse`
-                                    : isDone
-                                    ? "bg-emerald-400"
-                                    : isFailed
-                                    ? "bg-red-400"
-                                    : "bg-slate-600"
+                                  isActive ? `${st.dot} animate-pulse` : isDone ? "bg-emerald-400" : isFailed ? "bg-red-400" : "bg-slate-600"
                                 }`}
                               />
-                              <span
-                                className={`text-xs font-semibold ${st.name}`}
-                              >
+                              <span className={`text-xs font-semibold ${st.name}`}>
                                 {agentLabel(step.agentKey)}
                               </span>
                               <span className="truncate text-xs text-slate-300">
@@ -343,7 +322,6 @@ export function WorkflowLivePanel({ onClose }: WorkflowLivePanelProps) {
                 </div>
               ) : null}
 
-              {/* Past workflows */}
               {!loadingPast && pastWorkflows.length > 0 ? (
                 <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
                   <p className="mb-2 text-xs font-semibold text-slate-400">
@@ -360,13 +338,7 @@ export function WorkflowLivePanel({ onClose }: WorkflowLivePanelProps) {
                         >
                           <span
                             className={
-                              wf.status === "completed"
-                                ? "text-emerald-400"
-                                : wf.status === "failed"
-                                ? "text-red-400"
-                                : wf.status === "running"
-                                ? "text-cyan-400"
-                                : "text-slate-500"
+                              wf.status === "completed" ? "text-emerald-400" : wf.status === "failed" ? "text-red-400" : wf.status === "running" ? "text-cyan-400" : "text-slate-500"
                             }
                           >
                             [{wf.status}]{" "}
@@ -380,14 +352,10 @@ export function WorkflowLivePanel({ onClose }: WorkflowLivePanelProps) {
               ) : null}
             </aside>
 
-            {/* ─── Right: live activity chat ─────────────────────── */}
             <div className="flex flex-col gap-4">
               <div className="flex min-h-[520px] flex-col rounded-2xl border border-white/10 bg-black/30">
-                {/* Chat header */}
                 <div className="flex items-center justify-between border-b border-white/10 px-4 py-2.5">
-                  <p className="text-sm font-semibold text-white">
-                    Живой чат агентов
-                  </p>
+                  <p className="text-sm font-semibold text-white">Живой чат агентов</p>
                   <div className="flex items-center gap-3">
                     {running ? (
                       <span className="flex items-center gap-1.5 text-xs text-cyan-300">
@@ -395,20 +363,12 @@ export function WorkflowLivePanel({ onClose }: WorkflowLivePanelProps) {
                         Работают…
                       </span>
                     ) : activityLog.length > 0 ? (
-                      <span className="text-xs text-slate-500">
-                        {activityLog.length} действий
-                      </span>
+                      <span className="text-xs text-slate-500">{activityLog.length} действий</span>
                     ) : null}
                     {activeWorkflow?.status ? (
                       <span
                         className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                          activeWorkflow.status === "completed"
-                            ? "bg-emerald-500/20 text-emerald-300"
-                            : activeWorkflow.status === "failed"
-                            ? "bg-red-500/20 text-red-300"
-                            : activeWorkflow.status === "running"
-                            ? "bg-cyan-500/20 text-cyan-300"
-                            : "bg-white/10 text-slate-400"
+                          activeWorkflow.status === "completed" ? "bg-emerald-500/20 text-emerald-300" : activeWorkflow.status === "failed" ? "bg-red-500/20 text-red-300" : activeWorkflow.status === "running" ? "bg-cyan-500/20 text-cyan-300" : "bg-white/10 text-slate-400"
                         }`}
                       >
                         {activeWorkflow.status}
@@ -417,46 +377,30 @@ export function WorkflowLivePanel({ onClose }: WorkflowLivePanelProps) {
                   </div>
                 </div>
 
-                {/* Chat messages */}
-                <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3 space-y-2">
+                <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-4 py-3">
                   {activityLog.length === 0 ? (
                     <div className="flex h-full items-center justify-center">
-                      <p className="text-center text-sm text-slate-500">
-                        {planning
-                          ? "CEO разбирает задачу…"
-                          : running
-                          ? "Агенты запускаются…"
-                          : "Нажми «Разобрать задачу» → «Запустить ▶»\nчтобы увидеть живой поток агентов"}
+                      <p className="whitespace-pre-line text-center text-sm text-slate-500">
+                        {planning ? "Chief разбирает задачу…" : running ? "Агенты запускаются…" : "Нажми «Разобрать задачу» → «Запустить ▶»\nчтобы увидеть живой поток агентов"}
                       </p>
                     </div>
                   ) : (
                     <>
-                      {activityLog.map((entry) => (
-                        <ActivityBubble key={entry.id} entry={entry} />
-                      ))}
-                      {/* Typing indicator */}
-                      {running && activeWorkflow?.currentActivity ? (
-                        <TypingIndicator text={activeWorkflow.currentActivity} />
-                      ) : null}
+                      {activityLog.map((entry) => <ActivityBubble key={entry.id} entry={entry} />)}
+                      {running && activeWorkflow?.currentActivity ? <TypingIndicator text={activeWorkflow.currentActivity} /> : null}
                     </>
                   )}
                   <div ref={logEndRef} />
                 </div>
               </div>
 
-              {/* Final result */}
               {activeWorkflow?.finalResult ? (
                 <div className="rounded-2xl border border-emerald-500/25 bg-emerald-950/30 p-4">
-                  <p className="mb-2 text-sm font-semibold text-emerald-300">
-                    ✅ Финальный результат
-                  </p>
-                  <pre className="max-h-64 overflow-y-auto whitespace-pre-wrap text-sm text-white">
-                    {activeWorkflow.finalResult}
-                  </pre>
+                  <p className="mb-2 text-sm font-semibold text-emerald-300">✅ Финальный результат</p>
+                  <pre className="max-h-64 overflow-y-auto whitespace-pre-wrap text-sm text-white">{activeWorkflow.finalResult}</pre>
                 </div>
               ) : null}
 
-              {/* Error */}
               {activeWorkflow?.status === "failed" && activeWorkflow.error ? (
                 <div className="rounded-2xl border border-red-400/20 bg-red-950/30 p-4">
                   <p className="mb-1 text-sm font-semibold text-red-300">Ошибка</p>
@@ -495,17 +439,13 @@ function ActivityBubble({ entry }: { entry: ActivityEntry }) {
       <div className="mb-1.5 flex items-center gap-2">
         <span className="text-sm leading-none">{icon}</span>
         <span className={`text-xs font-semibold ${st.name}`}>{label}</span>
-        <span className="ml-auto text-[10px] text-slate-600">
-          {formatTime(entry.ts)}
-        </span>
+        <span className="ml-auto text-[10px] text-slate-600">{formatTime(entry.ts)}</span>
       </div>
 
       {entry.text ? (
         <div>
           <pre
-            className={`whitespace-pre-wrap text-xs leading-relaxed text-slate-200 ${
-              !expanded && isLong ? "line-clamp-5" : ""
-            } ${isOutput ? "text-slate-100" : "text-slate-400 italic"}`}
+            className={`whitespace-pre-wrap text-xs leading-relaxed text-slate-200 ${!expanded && isLong ? "line-clamp-5" : ""} ${isOutput ? "text-slate-100" : "text-slate-400 italic"}`}
           >
             {entry.text}
           </pre>
@@ -528,20 +468,11 @@ function TypingIndicator({ text }: { text: string }) {
   return (
     <div className="flex items-center gap-2 rounded-xl border border-white/5 bg-white/[0.02] px-3 py-2">
       <span className="flex gap-1">
-        <span
-          className="inline-block h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400"
-          style={{ animationDelay: "0ms" }}
-        />
-        <span
-          className="inline-block h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400"
-          style={{ animationDelay: "150ms" }}
-        />
-        <span
-          className="inline-block h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400"
-          style={{ animationDelay: "300ms" }}
-        />
+        <span className="inline-block h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400" style={{ animationDelay: "0ms" }} />
+        <span className="inline-block h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400" style={{ animationDelay: "150ms" }} />
+        <span className="inline-block h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400" style={{ animationDelay: "300ms" }} />
       </span>
-      <span className="text-xs text-slate-500 italic">{text}</span>
+      <span className="text-xs italic text-slate-500">{text}</span>
     </div>
   );
 }
