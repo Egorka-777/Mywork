@@ -23,6 +23,9 @@ export type WorkflowArtifact = {
 };
 
 const URL_RE = /https?:\/\/[^\s)\]}>'"]+/gi;
+const MAX_TEXT_CONTENT_LENGTH = 60_000;
+const MAX_SUMMARY_LENGTH = 4_000;
+const MAX_STRUCTURED_JSON_LENGTH = 60_000;
 
 function cleanUrl(raw: string): string {
   return raw.trim().replace(/[.,;!?]+$/g, "");
@@ -101,6 +104,42 @@ function summaryForUrl(type: WorkflowArtifactType, url: string): string {
   }
 }
 
+const ALLOWED_ARTIFACT_TYPES: WorkflowArtifactType[] = [
+  "plain_url",
+  "instagram_profile_url",
+  "instagram_post_url",
+  "instagram_carousel_analysis",
+  "instagram_profile_snapshot",
+  "extracted_source",
+  "style_reference",
+  "character_reference",
+  "tool_warning",
+  "unknown",
+];
+
+function normalizeArtifactType(value: unknown): WorkflowArtifactType {
+  return typeof value === "string" && ALLOWED_ARTIFACT_TYPES.includes(value as WorkflowArtifactType)
+    ? (value as WorkflowArtifactType)
+    : "unknown";
+}
+
+function normalizeArtifactSource(value: unknown): WorkflowArtifact["source"] {
+  return value === "user_request" || value === "manual" || value === "upload" || value === "tool"
+    ? value
+    : "manual";
+}
+
+function safeStructuredData(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const json = JSON.stringify(value);
+  if (json.length <= MAX_STRUCTURED_JSON_LENGTH) return value as Record<string, unknown>;
+  return {
+    truncated: true,
+    originalJsonLength: json.length,
+    preview: json.slice(0, MAX_STRUCTURED_JSON_LENGTH),
+  };
+}
+
 export function makeWorkflowArtifact(input: {
   id: string;
   type: WorkflowArtifactType;
@@ -112,15 +151,16 @@ export function makeWorkflowArtifact(input: {
   structuredData?: Record<string, unknown>;
   createdAt?: string;
 }): WorkflowArtifact {
+  const cleanSourceUrl = input.sourceUrl && parseSafeUrl(input.sourceUrl) ? cleanUrl(input.sourceUrl) : undefined;
   return {
-    id: input.id,
+    id: input.id.slice(0, 120),
     type: input.type,
     source: input.source,
-    title: input.title ?? titleForType(input.type),
-    summary: input.summary,
-    sourceUrl: input.sourceUrl,
-    textContent: input.textContent,
-    structuredData: input.structuredData,
+    title: (input.title?.trim() || titleForType(input.type)).slice(0, 240),
+    summary: input.summary.trim().slice(0, MAX_SUMMARY_LENGTH),
+    sourceUrl: cleanSourceUrl,
+    textContent: input.textContent?.slice(0, MAX_TEXT_CONTENT_LENGTH),
+    structuredData: safeStructuredData(input.structuredData),
     createdAt: input.createdAt ?? new Date().toISOString(),
   };
 }
@@ -144,6 +184,38 @@ export function buildArtifactsFromUserRequest(userRequest: string): WorkflowArti
   });
 }
 
+export function sanitizeWorkflowArtifacts(input: unknown): WorkflowArtifact[] {
+  if (!Array.isArray(input)) return [];
+  const now = new Date().toISOString();
+  return input
+    .map((item, index): WorkflowArtifact | null => {
+      if (!item || typeof item !== "object") return null;
+      const raw = item as Record<string, unknown>;
+      const type = normalizeArtifactType(raw.type);
+      const source = normalizeArtifactSource(raw.source);
+      const sourceUrl = typeof raw.sourceUrl === "string" && parseSafeUrl(raw.sourceUrl) ? cleanUrl(raw.sourceUrl) : undefined;
+      const fallbackId = `${source}-${type}-${index + 1}`;
+      return makeWorkflowArtifact({
+        id: typeof raw.id === "string" && raw.id.trim() ? raw.id.trim() : fallbackId,
+        type,
+        source,
+        sourceUrl,
+        title: typeof raw.title === "string" ? raw.title : undefined,
+        summary: typeof raw.summary === "string" && raw.summary.trim() ? raw.summary : "No summary provided.",
+        textContent: typeof raw.textContent === "string" ? raw.textContent : undefined,
+        structuredData: safeStructuredData(raw.structuredData),
+        createdAt: typeof raw.createdAt === "string" && raw.createdAt.trim() ? raw.createdAt : now,
+      });
+    })
+    .filter((artifact): artifact is WorkflowArtifact => artifact !== null);
+}
+
+export function mergeWorkflowArtifacts(requestArtifacts: WorkflowArtifact[], providedArtifacts: WorkflowArtifact[]): WorkflowArtifact[] {
+  const providedUrls = new Set(providedArtifacts.map((artifact) => artifact.sourceUrl).filter((url): url is string => Boolean(url)));
+  const filteredRequestArtifacts = requestArtifacts.filter((artifact) => !artifact.sourceUrl || !providedUrls.has(artifact.sourceUrl));
+  return [...filteredRequestArtifacts, ...providedArtifacts];
+}
+
 export function summarizeArtifactsForWorkflow(artifacts: WorkflowArtifact[]): string {
   if (artifacts.length === 0) return "(none)";
   return artifacts
@@ -155,8 +227,8 @@ export function summarizeArtifactsForWorkflow(artifacts: WorkflowArtifact[]): st
       ];
       if (artifact.sourceUrl) lines.push(`url: ${artifact.sourceUrl}`);
       lines.push(`summary: ${artifact.summary}`);
-      if (artifact.textContent?.trim()) lines.push(`text: ${artifact.textContent.slice(0, 12000)}`);
-      if (artifact.structuredData) lines.push(`structuredData: ${JSON.stringify(artifact.structuredData).slice(0, 12000)}`);
+      if (artifact.textContent?.trim()) lines.push(`text: ${artifact.textContent.slice(0, 12_000)}`);
+      if (artifact.structuredData) lines.push(`structuredData: ${JSON.stringify(artifact.structuredData, null, 2).slice(0, 12_000)}`);
       return lines.join("\n");
     })
     .join("\n\n");
