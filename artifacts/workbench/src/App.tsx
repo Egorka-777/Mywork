@@ -8,7 +8,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { AgentsHubCard } from "./AgentsHubCard";
-import { AgentsHubPanel } from "./AgentsHubPanel";
+import { AgentsHubPanel } from "./AgentsHubPanelJarvis";
 import { fetchAgents, fetchBrainState } from "./brainApi";
 import type { BrainState } from "./brainTypes";
 import { CarouselRemixPanel } from "./CarouselRemixPanel";
@@ -115,7 +115,7 @@ export default function App() {
         </h1>
         <p className="mt-2 max-w-2xl text-sm text-[#6b6b7a]">
           Инструменты, которые вы добавляете — выключатели, пайплайны и
-          визуальные схемы, без погрузки в код.
+          визуальные схемы, без погружения в код.
         </p>
       </header>
 
