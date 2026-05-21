@@ -5,6 +5,7 @@ export type WorkflowArtifactType =
   | "instagram_carousel_analysis"
   | "instagram_profile_snapshot"
   | "extracted_source"
+  | "source_rewriter_carousel_result"
   | "style_reference"
   | "character_reference"
   | "tool_warning"
@@ -26,6 +27,7 @@ const URL_RE = /https?:\/\/[^\s)\]}>'"]+/gi;
 const MAX_TEXT_CONTENT_LENGTH = 60_000;
 const MAX_SUMMARY_LENGTH = 4_000;
 const MAX_STRUCTURED_JSON_LENGTH = 60_000;
+const PREPARED_ARTIFACTS_MARKER = "--- ПОДТВЕРЖДЁННЫЕ АРТЕФАКТЫ, ПОДГОТОВЛЕННЫЕ AGENTS HUB ---";
 
 function cleanUrl(raw: string): string {
   return raw.trim().replace(/[.,;!?]+$/g, "");
@@ -78,6 +80,8 @@ function titleForType(type: WorkflowArtifactType): string {
       return "Instagram profile snapshot";
     case "extracted_source":
       return "Extracted source file";
+    case "source_rewriter_carousel_result":
+      return "Source Rewriter carousel result";
     case "style_reference":
       return "Style reference";
     case "character_reference":
@@ -111,6 +115,7 @@ const ALLOWED_ARTIFACT_TYPES: WorkflowArtifactType[] = [
   "instagram_carousel_analysis",
   "instagram_profile_snapshot",
   "extracted_source",
+  "source_rewriter_carousel_result",
   "style_reference",
   "character_reference",
   "tool_warning",
@@ -227,11 +232,20 @@ export function extractEmbeddedArtifactsFromText(text: string): WorkflowArtifact
   return artifacts;
 }
 
+function stripPreparedArtifactsBlock(text: string): string {
+  const markerIndex = text.indexOf(PREPARED_ARTIFACTS_MARKER);
+  if (markerIndex !== -1) return text.slice(0, markerIndex);
+  const artifactIndex = text.indexOf("\nARTIFACT:");
+  if (artifactIndex !== -1) return text.slice(0, artifactIndex);
+  return text;
+}
+
 export function buildArtifactsFromUserRequest(userRequest: string): WorkflowArtifact[] {
   const now = new Date().toISOString();
   const embeddedArtifacts = extractEmbeddedArtifactsFromText(userRequest);
   const embeddedUrls = new Set(embeddedArtifacts.map((artifact) => artifact.sourceUrl).filter((url): url is string => Boolean(url)));
-  const urlArtifacts = extractUrlsFromText(userRequest)
+  const textForUrlScan = stripPreparedArtifactsBlock(userRequest);
+  const urlArtifacts = extractUrlsFromText(textForUrlScan)
     .filter((url) => !embeddedUrls.has(url))
     .map((url, index) => {
       const type = classifyUrl(url);
