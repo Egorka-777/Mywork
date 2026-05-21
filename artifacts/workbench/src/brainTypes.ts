@@ -130,6 +130,7 @@ export type WorkflowArtifactType =
   | "instagram_carousel_analysis"
   | "instagram_profile_snapshot"
   | "extracted_source"
+  | "source_rewriter_carousel_result"
   | "style_reference"
   | "character_reference"
   | "tool_warning"
