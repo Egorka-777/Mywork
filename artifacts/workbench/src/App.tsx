@@ -13,6 +13,9 @@ import { fetchAgents, fetchBrainState } from "./brainApi";
 import type { BrainState } from "./brainTypes";
 import { CarouselRemixPanel } from "./CarouselRemixPanel";
 import { FreedzPanel } from "./FreedzPanel";
+import { InstagramRadarPanel } from "./InstagramRadarPanel";
+import { InstagramRadarTile } from "./InstagramRadarTile";
+import { fetchInstagramCompetitors, fetchInstagramRadarPosts } from "./instagramRadarApi";
 import { SourceRewriterPanel } from "./SourceRewriterPanel";
 import { TrackerTile } from "./TrackerTile";
 import { WorkflowLivePanel } from "./WorkflowLivePanel";
@@ -29,6 +32,7 @@ export default function App() {
   const [freedzError, setFreedzError] = useState<string | null>(null);
   const [openFreedz, setOpenFreedz] = useState(false);
   const [openCarouselRemix, setOpenCarouselRemix] = useState(false);
+  const [openInstagramRadar, setOpenInstagramRadar] = useState(false);
   const [openSourceRewriter, setOpenSourceRewriter] = useState(false);
   const [openAgentsHub, setOpenAgentsHub] = useState(false);
   const [openWorkflowLive, setOpenWorkflowLive] = useState(false);
@@ -36,6 +40,10 @@ export default function App() {
   const [agentsCount, setAgentsCount] = useState(0);
   const [brainLoading, setBrainLoading] = useState(false);
   const [brainError, setBrainError] = useState<string | null>(null);
+  const [radarCompetitorsCount, setRadarCompetitorsCount] = useState(0);
+  const [radarPostsCount, setRadarPostsCount] = useState(0);
+  const [radarLoading, setRadarLoading] = useState(false);
+  const [radarError, setRadarError] = useState<string | null>(null);
 
   const loadFreedz = useCallback(async () => {
     try {
@@ -55,6 +63,44 @@ export default function App() {
   useEffect(() => {
     void loadFreedz();
   }, [loadFreedz]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadInstagramRadarSummary() {
+      setRadarLoading(true);
+      setRadarError(null);
+
+      try {
+        const [competitors, posts] = await Promise.all([
+          fetchInstagramCompetitors(),
+          fetchInstagramRadarPosts({ windowDays: 3, limit: 100 }),
+        ]);
+
+        if (cancelled) {
+          return;
+        }
+
+        setRadarCompetitorsCount(competitors.length);
+        setRadarPostsCount(posts.length);
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+        setRadarError(error instanceof Error ? error.message : "Failed to load Instagram Radar");
+      } finally {
+        if (!cancelled) {
+          setRadarLoading(false);
+        }
+      }
+    }
+
+    void loadInstagramRadarSummary();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -152,6 +198,13 @@ export default function App() {
             onOpen={() => setOpenCarouselRemix(true)}
             open={openCarouselRemix}
           />
+          <InstagramRadarTile
+            postsCount={radarPostsCount}
+            competitorsCount={radarCompetitorsCount}
+            loading={radarLoading}
+            error={radarError}
+            onOpen={() => setOpenInstagramRadar(true)}
+          />
           <SourceRewriterCard
             onOpen={() => setOpenSourceRewriter(true)}
             open={openSourceRewriter}
@@ -167,6 +220,9 @@ export default function App() {
       )}
       {openCarouselRemix && (
         <CarouselRemixPanel onClose={() => setOpenCarouselRemix(false)} />
+      )}
+      {openInstagramRadar && (
+        <InstagramRadarPanel onClose={() => setOpenInstagramRadar(false)} />
       )}
       {openSourceRewriter && (
         <SourceRewriterPanel onClose={() => setOpenSourceRewriter(false)} />
