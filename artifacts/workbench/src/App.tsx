@@ -9,6 +9,10 @@ import {
 } from "lucide-react";
 import { AgentsHubCard } from "./AgentsHubCard";
 import { AgentsHubPanel } from "./AgentsHubPanelJarvis";
+import { AssetVaultPanel } from "./AssetVaultPanel";
+import { AssetVaultTile } from "./AssetVaultTile";
+import { fetchFaceAssets } from "./assetVaultApi";
+import type { FaceAsset } from "./assetVaultTypes";
 import { fetchAgents, fetchBrainState } from "./brainApi";
 import type { BrainState } from "./brainTypes";
 import { CarouselRemixPanel } from "./CarouselRemixPanel";
@@ -34,6 +38,7 @@ export default function App() {
   const [openFreedz, setOpenFreedz] = useState(false);
   const [openCarouselRemix, setOpenCarouselRemix] = useState(false);
   const [openInstagramRadar, setOpenInstagramRadar] = useState(false);
+  const [openAssetVault, setOpenAssetVault] = useState(false);
   const [openSourceRewriter, setOpenSourceRewriter] = useState(false);
   const [openAgentsHub, setOpenAgentsHub] = useState(false);
   const [openWorkflowLive, setOpenWorkflowLive] = useState(false);
@@ -45,6 +50,9 @@ export default function App() {
   const [radarPostsCount, setRadarPostsCount] = useState(0);
   const [radarLoading, setRadarLoading] = useState(false);
   const [radarError, setRadarError] = useState<string | null>(null);
+  const [facesCount, setFacesCount] = useState(0);
+  const [facesLoading, setFacesLoading] = useState(false);
+  const [facesError, setFacesError] = useState<string | null>(null);
   const [carouselSourcePayload, setCarouselSourcePayload] = useState<SourceRewriterNextActionPayload | null>(null);
 
   const loadFreedz = useCallback(async () => {
@@ -65,6 +73,36 @@ export default function App() {
   useEffect(() => {
     void loadFreedz();
   }, [loadFreedz]);
+
+  const handleFacesChanged = useCallback((faces: FaceAsset[]) => {
+    setFacesCount(faces.length);
+    setFacesError(null);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadFacesSummary() {
+      setFacesLoading(true);
+      setFacesError(null);
+      try {
+        const faces = await fetchFaceAssets();
+        if (cancelled) return;
+        setFacesCount(faces.length);
+      } catch (error) {
+        if (cancelled) return;
+        setFacesError(error instanceof Error ? error.message : "Failed to load Asset Vault");
+      } finally {
+        if (!cancelled) setFacesLoading(false);
+      }
+    }
+
+    void loadFacesSummary();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -207,6 +245,12 @@ export default function App() {
             error={radarError}
             onOpen={() => setOpenInstagramRadar(true)}
           />
+          <AssetVaultTile
+            facesCount={facesCount}
+            loading={facesLoading}
+            error={facesError}
+            onOpen={() => setOpenAssetVault(true)}
+          />
           <SourceRewriterCard
             onOpen={() => setOpenSourceRewriter(true)}
             open={openSourceRewriter}
@@ -228,6 +272,12 @@ export default function App() {
       )}
       {openInstagramRadar && (
         <InstagramRadarPanel onClose={() => setOpenInstagramRadar(false)} />
+      )}
+      {openAssetVault && (
+        <AssetVaultPanel
+          onClose={() => setOpenAssetVault(false)}
+          onChanged={handleFacesChanged}
+        />
       )}
       {openSourceRewriter && (
         <SourceRewriterPanel
