@@ -25,6 +25,20 @@ export type {
   RewrittenSource,
 } from "./sourceRewriterTypes";
 
+export type SourceRewriterNextAction = "carousel" | "pdf" | "presentation" | "lipsync";
+
+export type SourceRewriterNextActionPayload = {
+  action: SourceRewriterNextAction;
+  title: string;
+  text: string;
+  markdown: string;
+  sourceFileName: string | null;
+};
+
+type SourceRewriterPipelineProps = {
+  onNextAction?: (payload: SourceRewriterNextActionPayload) => void;
+};
+
 const REWRITE_MODE_OPTIONS: { value: RewriteMode; label: string }[] = [
   { value: "carousel_script", label: "Преобразовать в сценарий карусели" },
   { value: "preserve_original_structure", label: "Сохранить исходную структуру" },
@@ -270,6 +284,31 @@ function downloadBlob(filename: string, content: string, mime: string) {
   URL.revokeObjectURL(url);
 }
 
+function buildNextActionPayload(
+  action: SourceRewriterNextAction,
+  rewritten: RewrittenSource,
+  promptOverride?: string,
+  sourceFileName?: string
+): SourceRewriterNextActionPayload {
+  const markdown = buildStructuredMarkdown(rewritten, promptOverride);
+  const text =
+    rewritten.fullRewrittenText ||
+    rewritten.rewrittenCaption ||
+    rewritten.rewrittenTranscript ||
+    rewritten.rewrittenCarouselPages?.map((page) => page.rewrittenText).join("\n\n") ||
+    rewritten.rewrittenPages?.map((page) => page.rewrittenText).join("\n\n") ||
+    rewritten.rewrittenSlides?.map((slide) => slide.rewrittenText).join("\n\n") ||
+    markdown;
+
+  return {
+    action,
+    title: sourceFileName ? sourceFileName.replace(/\.[^.]+$/, "") : "source-rewriter-result",
+    text,
+    markdown,
+    sourceFileName: sourceFileName ?? null,
+  };
+}
+
 function VisualAssetFields({
   asset,
   onChange,
@@ -341,7 +380,7 @@ function VisualAssetFields({
   );
 }
 
-export function SourceRewriterPipeline() {
+export function SourceRewriterPipeline({ onNextAction }: SourceRewriterPipelineProps) {
   const fileRef = useRef<HTMLInputElement>(null);
   const styleRefFilesRef = useRef<File[]>([]);
   const characterRefFileRef = useRef<File | null>(null);
@@ -477,6 +516,13 @@ export function SourceRewriterPipeline() {
     await navigator.clipboard.writeText(prompt);
     setCopiedPrompt(true);
     setTimeout(() => setCopiedPrompt(false), 1800);
+  };
+
+  const handleNextAction = (action: SourceRewriterNextAction) => {
+    if (!rewritten) return;
+    onNextAction?.(
+      buildNextActionPayload(action, rewritten, getCurrentPromptPack(), file?.name)
+    );
   };
 
   const setEdited = (updater: (e: ExtractedSource) => ExtractedSource) => {
@@ -962,9 +1008,37 @@ export function SourceRewriterPipeline() {
         </section>
       )}
 
+      {showRewritten && rewritten && (
+        <section className="rounded-xl border border-white/8 bg-white/[0.02] p-4">
+          {sectionTitle("5. Что сделать дальше?")}
+          <p className="mt-2 text-xs text-white/40">
+            Выбери, во что превратить переписанный материал. Сейчас это router-контракт: генераторы подключаются отдельными проходами.
+          </p>
+          <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            <button type="button" onClick={() => handleNextAction("carousel")} className={buttonClass("teal")}>
+              Карусель
+            </button>
+            <button type="button" onClick={() => handleNextAction("pdf")} className={buttonClass("white")}>
+              PDF
+            </button>
+            <button type="button" onClick={() => handleNextAction("presentation")} className={buttonClass("white")}>
+              Презентация
+            </button>
+            <button type="button" onClick={() => handleNextAction("lipsync")} className={buttonClass("white")}>
+              Lipsync video
+            </button>
+          </div>
+          {!onNextAction ? (
+            <p className="mt-3 text-xs text-white/35">
+              Следующий модуль ещё не подключён. Payload уже собирается внутри Source Rewriter и будет использован в следующих проходах.
+            </p>
+          ) : null}
+        </section>
+      )}
+
       {showRewritten && (
         <section className="rounded-xl border border-white/8 bg-white/[0.02] p-4">
-          {sectionTitle("5. Экспорт")}
+          {sectionTitle("6. Экспорт")}
           <div className="mt-4 flex flex-wrap gap-2">
             <button type="button" onClick={copyAll} className={buttonClass("white")}>
               <ClipboardCopy className="h-4 w-4" />
