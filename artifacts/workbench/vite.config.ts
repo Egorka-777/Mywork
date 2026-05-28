@@ -6,6 +6,7 @@ import { defineConfig } from "vite";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const apiPort = Number(process.env.WORKBENCH_API_PORT) || 8788;
+const radarApiPort = Number(process.env.INSTAGRAM_RADAR_API_PORT) || 8789;
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
@@ -17,7 +18,10 @@ export default defineConfig({
     host: "0.0.0.0",
     allowedHosts: true,
     strictPort: true,
-    proxy: { "/wb": { target: `http://127.0.0.1:${apiPort}` } },
+    proxy: {
+      "/wb/instagram-radar": { target: `http://127.0.0.1:${radarApiPort}` },
+      "/wb": { target: `http://127.0.0.1:${apiPort}` },
+    },
   },
   build: {
     outDir: "dist",
