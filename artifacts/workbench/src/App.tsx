@@ -17,6 +17,7 @@ import { InstagramRadarPanel } from "./InstagramRadarPanel";
 import { InstagramRadarTile } from "./InstagramRadarTile";
 import { fetchInstagramCompetitors, fetchInstagramRadarPosts } from "./instagramRadarApi";
 import { SourceRewriterPanel } from "./SourceRewriterPanel";
+import type { SourceRewriterNextActionPayload } from "./SourceRewriterPipeline";
 import { TrackerTile } from "./TrackerTile";
 import { WorkflowLivePanel } from "./WorkflowLivePanel";
 
@@ -44,6 +45,7 @@ export default function App() {
   const [radarPostsCount, setRadarPostsCount] = useState(0);
   const [radarLoading, setRadarLoading] = useState(false);
   const [radarError, setRadarError] = useState<string | null>(null);
+  const [carouselSourcePayload, setCarouselSourcePayload] = useState<SourceRewriterNextActionPayload | null>(null);
 
   const loadFreedz = useCallback(async () => {
     try {
@@ -219,13 +221,26 @@ export default function App() {
         />
       )}
       {openCarouselRemix && (
-        <CarouselRemixPanel onClose={() => setOpenCarouselRemix(false)} />
+        <CarouselRemixPanel
+          onClose={() => setOpenCarouselRemix(false)}
+          sourcePayload={carouselSourcePayload}
+        />
       )}
       {openInstagramRadar && (
         <InstagramRadarPanel onClose={() => setOpenInstagramRadar(false)} />
       )}
       {openSourceRewriter && (
-        <SourceRewriterPanel onClose={() => setOpenSourceRewriter(false)} />
+        <SourceRewriterPanel
+          onClose={() => setOpenSourceRewriter(false)}
+          onNextAction={(payload) => {
+            if (payload.action !== "carousel") {
+              return;
+            }
+            setCarouselSourcePayload(payload);
+            setOpenSourceRewriter(false);
+            setOpenCarouselRemix(true);
+          }}
+        />
       )}
       {openAgentsHub ? (
         <AgentsHubPanel
