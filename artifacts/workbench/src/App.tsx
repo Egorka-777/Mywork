@@ -20,6 +20,10 @@ import { FreedzPanel } from "./FreedzPanel";
 import { InstagramRadarPanel } from "./InstagramRadarPanel";
 import { InstagramRadarTile } from "./InstagramRadarTile";
 import { fetchInstagramCompetitors, fetchInstagramRadarPosts } from "./instagramRadarApi";
+import { fetchLipsyncJobs } from "./lipsyncApi";
+import type { LipsyncJob } from "./lipsyncTypes";
+import { LipsyncPanel } from "./LipsyncPanel";
+import { LipsyncTile } from "./LipsyncTile";
 import { SourceRewriterPanel } from "./SourceRewriterPanel";
 import type { SourceRewriterNextActionPayload } from "./SourceRewriterPipeline";
 import { TrackerTile } from "./TrackerTile";
@@ -39,6 +43,7 @@ export default function App() {
   const [openCarouselRemix, setOpenCarouselRemix] = useState(false);
   const [openInstagramRadar, setOpenInstagramRadar] = useState(false);
   const [openAssetVault, setOpenAssetVault] = useState(false);
+  const [openLipsync, setOpenLipsync] = useState(false);
   const [openSourceRewriter, setOpenSourceRewriter] = useState(false);
   const [openAgentsHub, setOpenAgentsHub] = useState(false);
   const [openWorkflowLive, setOpenWorkflowLive] = useState(false);
@@ -53,7 +58,11 @@ export default function App() {
   const [facesCount, setFacesCount] = useState(0);
   const [facesLoading, setFacesLoading] = useState(false);
   const [facesError, setFacesError] = useState<string | null>(null);
+  const [lipsyncJobsCount, setLipsyncJobsCount] = useState(0);
+  const [lipsyncLoading, setLipsyncLoading] = useState(false);
+  const [lipsyncError, setLipsyncError] = useState<string | null>(null);
   const [carouselSourcePayload, setCarouselSourcePayload] = useState<SourceRewriterNextActionPayload | null>(null);
+  const [lipsyncSourcePayload, setLipsyncSourcePayload] = useState<SourceRewriterNextActionPayload | null>(null);
 
   const loadFreedz = useCallback(async () => {
     try {
@@ -79,6 +88,11 @@ export default function App() {
     setFacesError(null);
   }, []);
 
+  const handleLipsyncJobsChanged = useCallback((jobs: LipsyncJob[]) => {
+    setLipsyncJobsCount(jobs.length);
+    setLipsyncError(null);
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
 
@@ -98,6 +112,31 @@ export default function App() {
     }
 
     void loadFacesSummary();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadLipsyncSummary() {
+      setLipsyncLoading(true);
+      setLipsyncError(null);
+      try {
+        const jobs = await fetchLipsyncJobs();
+        if (cancelled) return;
+        setLipsyncJobsCount(jobs.length);
+      } catch (error) {
+        if (cancelled) return;
+        setLipsyncError(error instanceof Error ? error.message : "Failed to load Lipsync Studio");
+      } finally {
+        if (!cancelled) setLipsyncLoading(false);
+      }
+    }
+
+    void loadLipsyncSummary();
 
     return () => {
       cancelled = true;
@@ -251,6 +290,12 @@ export default function App() {
             error={facesError}
             onOpen={() => setOpenAssetVault(true)}
           />
+          <LipsyncTile
+            jobsCount={lipsyncJobsCount}
+            loading={lipsyncLoading}
+            error={lipsyncError}
+            onOpen={() => setOpenLipsync(true)}
+          />
           <SourceRewriterCard
             onOpen={() => setOpenSourceRewriter(true)}
             open={openSourceRewriter}
@@ -279,16 +324,29 @@ export default function App() {
           onChanged={handleFacesChanged}
         />
       )}
+      {openLipsync && (
+        <LipsyncPanel
+          onClose={() => setOpenLipsync(false)}
+          initialPayload={lipsyncSourcePayload}
+          onJobsChanged={handleLipsyncJobsChanged}
+        />
+      )}
       {openSourceRewriter && (
         <SourceRewriterPanel
           onClose={() => setOpenSourceRewriter(false)}
           onNextAction={(payload) => {
-            if (payload.action !== "carousel") {
+            if (payload.action === "carousel") {
+              setCarouselSourcePayload(payload);
+              setOpenSourceRewriter(false);
+              setOpenCarouselRemix(true);
               return;
             }
-            setCarouselSourcePayload(payload);
-            setOpenSourceRewriter(false);
-            setOpenCarouselRemix(true);
+
+            if (payload.action === "lipsync") {
+              setLipsyncSourcePayload(payload);
+              setOpenSourceRewriter(false);
+              setOpenLipsync(true);
+            }
           }}
         />
       )}
