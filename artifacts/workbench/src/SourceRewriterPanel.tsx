@@ -1,7 +1,15 @@
 import { X } from "lucide-react";
-import { SourceRewriterPipeline } from "./SourceRewriterPipeline";
+import {
+  SourceRewriterPipeline,
+  type SourceRewriterNextActionPayload,
+} from "./SourceRewriterPipeline";
 
-export function SourceRewriterPanel({ onClose }: { onClose: () => void }) {
+type SourceRewriterPanelProps = {
+  onClose: () => void;
+  onNextAction?: (payload: SourceRewriterNextActionPayload) => void;
+};
+
+export function SourceRewriterPanel({ onClose, onNextAction }: SourceRewriterPanelProps) {
   return (
     <div
       className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-0 backdrop-blur-sm sm:items-center sm:p-4"
@@ -32,7 +40,7 @@ export function SourceRewriterPanel({ onClose }: { onClose: () => void }) {
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto p-4 md:p-6">
-          <SourceRewriterPipeline />
+          <SourceRewriterPipeline onNextAction={onNextAction} />
         </div>
       </div>
     </div>
