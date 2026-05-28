@@ -56,3 +56,8 @@ artifacts/workbench/data/brain/conversations/*.jsonl
 artifacts/workbench/data/brain/log.jsonl
 artifacts/workbench/data/brain/workflows/*.json
 artifacts/workbench/.env
+
+# Workbench Instagram Radar runtime files
+artifacts/workbench/data/instagram-radar/competitors.json
+artifacts/workbench/data/instagram-radar/posts-cache.json
+artifacts/workbench/data/instagram-radar/sync-log.jsonl
