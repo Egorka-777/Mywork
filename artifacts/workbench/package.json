@@ -4,9 +4,10 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "dev": "concurrently -k -n \"api,ui\" -c \"blue,magenta\" \"pnpm run dev:api\" \"pnpm run dev:ui\"",
+    "dev": "concurrently -k -n \"api,radar,ui\" -c \"blue,cyan,magenta\" \"pnpm run dev:api\" \"pnpm run dev:radar\" \"pnpm run dev:ui\"",
     "dev:ui": "vite",
     "dev:api": "tsx watch server/index.ts",
+    "dev:radar": "tsx watch server/instagramRadarServer.ts",
     "build": "tsc -p tsconfig.json --noEmit && vite build",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
