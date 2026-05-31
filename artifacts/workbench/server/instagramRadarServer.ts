@@ -24,16 +24,33 @@ function parseLimit(value: unknown): number {
   return Math.min(Math.floor(n), 100);
 }
 
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
+
 const app = express();
 app.use(cors({ origin: true }));
 app.use(express.json({ limit: "2mb" }));
+
+app.get("/wb/instagram-radar/health", (_req, res) => {
+  return res.json({
+    ok: true,
+    service: "instagram-radar",
+    port: PORT,
+    provider: {
+      apifyTokenConfigured: Boolean(APIFY_TOKEN),
+      apifyActorConfigured: Boolean(APIFY_ACTOR_ID),
+    },
+  });
+});
 
 app.get("/wb/instagram-radar/competitors", async (_req, res) => {
   try {
     const competitors = await readInstagramCompetitors();
     return res.json({ competitors });
   } catch (error) {
-    return res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+    console.error("[instagram-radar] failed to read competitors", error);
+    return res.json({ competitors: [], warning: errorMessage(error) });
   }
 });
 
@@ -46,7 +63,7 @@ app.put("/wb/instagram-radar/competitors", async (req, res) => {
     const competitors = await saveInstagramCompetitors(urls);
     return res.json({ competitors });
   } catch (error) {
-    return res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+    return res.status(400).json({ error: errorMessage(error) });
   }
 });
 
@@ -60,7 +77,7 @@ app.post("/wb/instagram-radar/sync", async (req, res) => {
     });
     return res.json(result);
   } catch (error) {
-    return res.status(502).json({ error: error instanceof Error ? error.message : String(error) });
+    return res.status(502).json({ error: errorMessage(error) });
   }
 });
 
@@ -71,7 +88,8 @@ app.get("/wb/instagram-radar/posts", async (req, res) => {
     const posts = filterRecentPosts(await readInstagramRadarPosts(), windowDays, limit);
     return res.json({ posts });
   } catch (error) {
-    return res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+    console.error("[instagram-radar] failed to read posts cache", error);
+    return res.json({ posts: [], warning: errorMessage(error) });
   }
 });
 

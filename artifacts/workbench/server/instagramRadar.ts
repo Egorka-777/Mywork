@@ -67,10 +67,28 @@ async function ensureRadarDir() {
   await fs.mkdir(radarDir, { recursive: true });
 }
 
+async function backupMalformedJson(filePath: string, raw: string) {
+  const backupPath = `${filePath}.malformed.${Date.now()}.bak`;
+  await fs.writeFile(backupPath, raw, "utf-8");
+  await fs.unlink(filePath).catch((error) => {
+    const err = error as NodeJS.ErrnoException;
+    if (err.code !== "ENOENT") throw error;
+  });
+  console.error(`[instagram-radar] malformed runtime JSON moved to ${backupPath}`);
+}
+
 async function readJsonFile<T>(filePath: string, fallback: T): Promise<T> {
   try {
     const raw = await fs.readFile(filePath, "utf-8");
-    return JSON.parse(raw) as T;
+    try {
+      return JSON.parse(raw) as T;
+    } catch (error) {
+      if (error instanceof SyntaxError) {
+        await backupMalformedJson(filePath, raw);
+        return fallback;
+      }
+      throw error;
+    }
   } catch (error) {
     const err = error as NodeJS.ErrnoException;
     if (err.code === "ENOENT") return fallback;
