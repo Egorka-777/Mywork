@@ -7,6 +7,8 @@ import { defineConfig } from "vite";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const apiPort = Number(process.env.WORKBENCH_API_PORT) || 8788;
 const radarApiPort = Number(process.env.INSTAGRAM_RADAR_API_PORT) || 8789;
+const assetVaultApiPort = Number(process.env.ASSET_VAULT_API_PORT) || 8790;
+const lipsyncApiPort = Number(process.env.LIPSYNC_API_PORT) || 8791;
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
@@ -20,6 +22,8 @@ export default defineConfig({
     strictPort: true,
     proxy: {
       "/wb/instagram-radar": { target: `http://127.0.0.1:${radarApiPort}` },
+      "/wb/assets": { target: `http://127.0.0.1:${assetVaultApiPort}` },
+      "/wb/lipsync": { target: `http://127.0.0.1:${lipsyncApiPort}` },
       "/wb": { target: `http://127.0.0.1:${apiPort}` },
     },
   },
