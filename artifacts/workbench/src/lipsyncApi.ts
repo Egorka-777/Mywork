@@ -1,5 +1,6 @@
 import type {
   CreateLipsyncJobInput,
+  LipsyncAudioUploadResponse,
   LipsyncJob,
   LipsyncJobResponse,
   LipsyncJobsResponse,
@@ -16,6 +17,14 @@ async function readError(response: Response): Promise<string> {
   } catch {
     return text;
   }
+}
+
+export async function uploadLipsyncAudio(file: File): Promise<LipsyncAudioUploadResponse> {
+  const body = new FormData();
+  body.append("audio", file);
+  const response = await fetch("/wb/lipsync/upload-audio", { method: "POST", body });
+  if (!response.ok) throw new Error(await readError(response));
+  return (await response.json()) as LipsyncAudioUploadResponse;
 }
 
 export async function fetchLipsyncJobs(): Promise<LipsyncJob[]> {
@@ -44,18 +53,28 @@ export async function fetchLipsyncJob(id: string): Promise<LipsyncJob> {
 }
 
 export async function deleteLipsyncJob(id: string): Promise<LipsyncJob[]> {
-  const response = await fetch(`/wb/lipsync/jobs/${encodeURIComponent(id)}`, {
-    method: "DELETE",
-  });
+  const response = await fetch(`/wb/lipsync/jobs/${encodeURIComponent(id)}`, { method: "DELETE" });
   if (!response.ok) throw new Error(await readError(response));
   const data = (await response.json()) as LipsyncJobsResponse;
   return data.jobs;
 }
 
 export async function markLipsyncReady(id: string): Promise<LipsyncJob> {
-  const response = await fetch(`/wb/lipsync/jobs/${encodeURIComponent(id)}/ready`, {
-    method: "POST",
-  });
+  const response = await fetch(`/wb/lipsync/jobs/${encodeURIComponent(id)}/ready`, { method: "POST" });
+  if (!response.ok) throw new Error(await readError(response));
+  const data = (await response.json()) as LipsyncJobResponse;
+  return data.job;
+}
+
+export async function renderLipsyncJob(id: string): Promise<LipsyncJob> {
+  const response = await fetch(`/wb/lipsync/jobs/${encodeURIComponent(id)}/render`, { method: "POST" });
+  if (!response.ok) throw new Error(await readError(response));
+  const data = (await response.json()) as LipsyncJobResponse;
+  return data.job;
+}
+
+export async function refreshLipsyncJob(id: string): Promise<LipsyncJob> {
+  const response = await fetch(`/wb/lipsync/jobs/${encodeURIComponent(id)}/refresh`, { method: "POST" });
   if (!response.ok) throw new Error(await readError(response));
   const data = (await response.json()) as LipsyncJobResponse;
   return data.job;
