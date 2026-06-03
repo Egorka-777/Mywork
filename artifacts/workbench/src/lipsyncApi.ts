@@ -4,6 +4,7 @@ import type {
   LipsyncJob,
   LipsyncJobResponse,
   LipsyncJobsResponse,
+  VideoSkeletonResponse,
 } from "./lipsyncTypes";
 
 async function readError(response: Response): Promise<string> {
@@ -17,6 +18,15 @@ async function readError(response: Response): Promise<string> {
   } catch {
     return text;
   }
+}
+
+export async function analyzeSourceVideoSkeleton(file: File, script: string): Promise<VideoSkeletonResponse> {
+  const body = new FormData();
+  body.append("video", file);
+  body.append("script", script);
+  const response = await fetch("/wb/lipsync/analyze-source-video", { method: "POST", body });
+  if (!response.ok) throw new Error(await readError(response));
+  return (await response.json()) as VideoSkeletonResponse;
 }
 
 export async function uploadLipsyncAudio(file: File): Promise<LipsyncAudioUploadResponse> {
