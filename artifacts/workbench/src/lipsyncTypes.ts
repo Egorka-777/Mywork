@@ -37,6 +37,11 @@ export type LipsyncJob = {
 export type LipsyncJobsResponse = { jobs: LipsyncJob[] };
 export type LipsyncJobResponse = { job: LipsyncJob };
 export type LipsyncAudioUploadResponse = { url: string; fileName: string };
+export type VideoSkeletonResponse = {
+  skeleton: string;
+  frameCount: number;
+  warnings: string[];
+};
 
 export type CreateLipsyncJobInput = {
   title: string;
