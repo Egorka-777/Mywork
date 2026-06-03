@@ -8,6 +8,10 @@ export type InstagramCompetitor = {
   updatedAt: string;
 };
 
+export type InstagramRadarAudience = "eng" | "ru" | "custom";
+
+export type InstagramRadarAccountBases = Record<InstagramRadarAudience, string[]>;
+
 export type InstagramRadarPostType = "carousel" | "reel" | "image" | "video" | "unknown";
 
 export type InstagramRadarPost = {
@@ -33,6 +37,7 @@ export type InstagramRadarPost = {
 export type InstagramRadarSyncResult = {
   ok: boolean;
   windowDays: number;
+  audience: InstagramRadarAudience;
   competitorsChecked: number;
   postsFound: number;
   postsKept: number;
@@ -41,6 +46,7 @@ export type InstagramRadarSyncResult = {
 
 export type InstagramRadarListResponse = {
   competitors: InstagramCompetitor[];
+  bases: InstagramRadarAccountBases;
 };
 
 export type InstagramRadarPostsResponse = {
