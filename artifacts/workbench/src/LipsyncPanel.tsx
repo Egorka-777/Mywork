@@ -13,6 +13,7 @@ import {
 } from "./lipsyncApi";
 import type { LipsyncJob, LipsyncResolution, LipsyncVideoFormat } from "./lipsyncTypes";
 import type { SourceRewriterNextActionPayload } from "./SourceRewriterPipeline";
+import { VideoSkeletonAnalyzer } from "./VideoSkeletonAnalyzer";
 
 type LipsyncPanelProps = {
   onClose: () => void;
@@ -171,6 +172,7 @@ export function LipsyncPanel({ onClose, initialPayload, onJobsChanged }: Lipsync
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto p-4 md:p-6">
+          <VideoSkeletonAnalyzer script={script} />
           <div className="grid gap-4 lg:grid-cols-[400px_1fr]">
             <section className="rounded-2xl border border-white/8 bg-white/[0.03] p-4">
               <h3 className="text-sm font-semibold text-white">Новый lipsync job</h3>
