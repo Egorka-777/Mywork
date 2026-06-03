@@ -4,10 +4,12 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "dev": "concurrently -k -n \"api,radar,ui\" -c \"blue,cyan,magenta\" \"pnpm run dev:api\" \"pnpm run dev:radar\" \"pnpm run dev:ui\"",
+    "dev": "concurrently -k -n \"api,radar,assets,lipsync,ui\" -c \"blue,cyan,green,yellow,magenta\" \"pnpm run dev:api\" \"pnpm run dev:radar\" \"pnpm run dev:assets\" \"pnpm run dev:lipsync\" \"pnpm run dev:ui\"",
     "dev:ui": "vite",
     "dev:api": "tsx watch server/index.ts",
     "dev:radar": "tsx watch server/instagramRadarServer.ts",
+    "dev:assets": "tsx watch server/assetVaultServer.ts",
+    "dev:lipsync": "tsx watch server/lipsyncServer.ts",
     "build": "tsc -p tsconfig.json --noEmit && vite build",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

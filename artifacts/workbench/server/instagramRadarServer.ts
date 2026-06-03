@@ -4,9 +4,14 @@ import {
   filterRecentPosts,
   readInstagramCompetitors,
   readInstagramRadarPosts,
-  saveInstagramCompetitors,
   syncInstagramRadar,
 } from "./instagramRadar";
+import {
+  filterInstagramRadarPostsByAudience,
+  readInstagramRadarAccountBases,
+  saveInstagramRadarAccountBase,
+  type InstagramRadarAudience,
+} from "./instagramRadarAccountBases";
 
 const PORT = Number(process.env.INSTAGRAM_RADAR_API_PORT) || 8789;
 const APIFY_TOKEN = process.env.APIFY_TOKEN || "";
@@ -24,43 +29,80 @@ function parseLimit(value: unknown): number {
   return Math.min(Math.floor(n), 100);
 }
 
+function parseAudience(value: unknown): InstagramRadarAudience | null {
+  if (value === "eng" || value === "ru" || value === "custom") return value;
+  return null;
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
+
 const app = express();
 app.use(cors({ origin: true }));
 app.use(express.json({ limit: "2mb" }));
 
+app.get("/wb/instagram-radar/health", (_req, res) => {
+  return res.json({
+    ok: true,
+    service: "instagram-radar",
+    port: PORT,
+    provider: {
+      apifyTokenConfigured: Boolean(APIFY_TOKEN),
+      apifyActorConfigured: Boolean(APIFY_ACTOR_ID),
+    },
+  });
+});
+
 app.get("/wb/instagram-radar/competitors", async (_req, res) => {
   try {
+    const bases = await readInstagramRadarAccountBases();
     const competitors = await readInstagramCompetitors();
-    return res.json({ competitors });
+    return res.json({ competitors, bases });
   } catch (error) {
-    return res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+    console.error("[instagram-radar] failed to read competitors", error);
+    return res.json({
+      competitors: [],
+      bases: { eng: [], ru: [], custom: [] },
+      warning: errorMessage(error),
+    });
   }
 });
 
 app.put("/wb/instagram-radar/competitors", async (req, res) => {
   try {
-    const { urls } = req.body as { urls?: unknown };
-    if (!Array.isArray(urls) || urls.some((url) => typeof url !== "string")) {
-      return res.status(400).json({ error: "Body must be { urls: string[] }" });
+    const { audience, urls } = req.body as { audience?: unknown; urls?: unknown };
+    const selectedAudience = parseAudience(audience);
+    if (!selectedAudience) {
+      return res.status(400).json({ error: "Body must include audience: eng | ru | custom" });
     }
-    const competitors = await saveInstagramCompetitors(urls);
-    return res.json({ competitors });
+    if (!Array.isArray(urls) || urls.some((url) => typeof url !== "string")) {
+      return res.status(400).json({ error: "Body must include urls: string[]" });
+    }
+    const result = await saveInstagramRadarAccountBase(selectedAudience, urls);
+    return res.json(result);
   } catch (error) {
-    return res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+    return res.status(400).json({ error: errorMessage(error) });
   }
 });
 
 app.post("/wb/instagram-radar/sync", async (req, res) => {
   try {
     const windowDays = parseWindowDays((req.body as { windowDays?: unknown }).windowDays);
+    const audience = parseAudience((req.body as { audience?: unknown }).audience) ?? "eng";
     const result = await syncInstagramRadar({
       windowDays,
       apifyToken: APIFY_TOKEN,
       apifyActorId: APIFY_ACTOR_ID,
     });
-    return res.json(result);
+    const bases = await readInstagramRadarAccountBases();
+    return res.json({
+      ...result,
+      audience,
+      posts: filterInstagramRadarPostsByAudience(result.posts, bases, audience),
+    });
   } catch (error) {
-    return res.status(502).json({ error: error instanceof Error ? error.message : String(error) });
+    return res.status(502).json({ error: errorMessage(error) });
   }
 });
 
@@ -68,10 +110,16 @@ app.get("/wb/instagram-radar/posts", async (req, res) => {
   try {
     const windowDays = parseWindowDays(req.query.windowDays);
     const limit = parseLimit(req.query.limit);
-    const posts = filterRecentPosts(await readInstagramRadarPosts(), windowDays, limit);
+    const audience = parseAudience(req.query.audience);
+    const allPosts = await readInstagramRadarPosts();
+    const scopedPosts = audience
+      ? filterInstagramRadarPostsByAudience(allPosts, await readInstagramRadarAccountBases(), audience)
+      : allPosts;
+    const posts = filterRecentPosts(scopedPosts, windowDays, limit);
     return res.json({ posts });
   } catch (error) {
-    return res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+    console.error("[instagram-radar] failed to read posts cache", error);
+    return res.json({ posts: [], warning: errorMessage(error) });
   }
 });
 

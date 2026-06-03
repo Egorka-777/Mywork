@@ -1,16 +1,32 @@
 import { useEffect, useMemo, useState } from "react";
 import { ClipboardCopy, ExternalLink, Loader2, RefreshCw, Save, X } from "lucide-react";
 import {
-  fetchInstagramCompetitors,
+  fetchInstagramRadarAccountState,
   fetchInstagramRadarPosts,
   saveInstagramCompetitors,
   syncInstagramRadar,
 } from "./instagramRadarApi";
-import type { InstagramCompetitor, InstagramRadarPost } from "./instagramRadarTypes";
+import type {
+  InstagramRadarAccountBases,
+  InstagramRadarAudience,
+  InstagramRadarPost,
+} from "./instagramRadarTypes";
 
 type InstagramRadarPanelProps = {
   onClose: () => void;
 };
+
+const EMPTY_BASES: InstagramRadarAccountBases = {
+  eng: [],
+  ru: [],
+  custom: [],
+};
+
+const AUDIENCE_OPTIONS: Array<{ id: InstagramRadarAudience; label: string }> = [
+  { id: "eng", label: "Англоязычная" },
+  { id: "ru", label: "Русскоязычная" },
+  { id: "custom", label: "Своя база" },
+];
 
 function formatDate(value: string | null) {
   if (!value) return "дата неизвестна";
@@ -29,8 +45,17 @@ function metric(value: number | null) {
   return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(value);
 }
 
+function usernameFromUrl(url: string) {
+  try {
+    return new URL(url).pathname.split("/").filter(Boolean)[0] || url;
+  } catch {
+    return url;
+  }
+}
+
 export function InstagramRadarPanel({ onClose }: InstagramRadarPanelProps) {
-  const [competitors, setCompetitors] = useState<InstagramCompetitor[]>([]);
+  const [audience, setAudience] = useState<InstagramRadarAudience>("eng");
+  const [accountBases, setAccountBases] = useState<InstagramRadarAccountBases>(EMPTY_BASES);
   const [posts, setPosts] = useState<InstagramRadarPost[]>([]);
   const [urlsText, setUrlsText] = useState("");
   const [windowDays, setWindowDays] = useState<1 | 2 | 3>(3);
@@ -39,6 +64,9 @@ export function InstagramRadarPanel({ onClose }: InstagramRadarPanelProps) {
   const [error, setError] = useState<string | null>(null);
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
   const [lastSync, setLastSync] = useState<string | null>(null);
+
+  const selectedUrls = accountBases[audience];
+  const totalAccounts = accountBases.eng.length + accountBases.ru.length + accountBases.custom.length;
 
   const sortedPosts = useMemo(
     () => [...posts].sort((a, b) => b.score - a.score),
@@ -52,14 +80,14 @@ export function InstagramRadarPanel({ onClose }: InstagramRadarPanelProps) {
       setLoading(true);
       setError(null);
       try {
-        const [nextCompetitors, nextPosts] = await Promise.all([
-          fetchInstagramCompetitors(),
-          fetchInstagramRadarPosts({ windowDays, limit: 30 }),
+        const [accountState, nextPosts] = await Promise.all([
+          fetchInstagramRadarAccountState(),
+          fetchInstagramRadarPosts({ windowDays, limit: 30, audience }),
         ]);
         if (cancelled) return;
-        setCompetitors(nextCompetitors);
+        setAccountBases(accountState.bases);
         setPosts(nextPosts);
-        setUrlsText(nextCompetitors.map((item) => item.url).join("\n"));
+        setUrlsText(accountState.bases[audience].join("\n"));
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
       } finally {
@@ -72,7 +100,7 @@ export function InstagramRadarPanel({ onClose }: InstagramRadarPanelProps) {
     return () => {
       cancelled = true;
     };
-  }, [windowDays]);
+  }, [audience, windowDays]);
 
   async function handleSaveCompetitors() {
     setLoading(true);
@@ -82,9 +110,9 @@ export function InstagramRadarPanel({ onClose }: InstagramRadarPanelProps) {
         .split(/\n+/)
         .map((line) => line.trim())
         .filter(Boolean);
-      const nextCompetitors = await saveInstagramCompetitors(urls);
-      setCompetitors(nextCompetitors);
-      setUrlsText(nextCompetitors.map((item) => item.url).join("\n"));
+      const nextState = await saveInstagramCompetitors(audience, urls);
+      setAccountBases(nextState.bases);
+      setUrlsText(nextState.bases[audience].join("\n"));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -96,9 +124,9 @@ export function InstagramRadarPanel({ onClose }: InstagramRadarPanelProps) {
     setSyncing(true);
     setError(null);
     try {
-      const result = await syncInstagramRadar(windowDays);
+      const result = await syncInstagramRadar(windowDays, audience);
       setPosts(result.posts);
-      setLastSync(`${result.competitorsChecked} конкурентов · ${result.postsKept} постов оставлено`);
+      setLastSync(`${result.competitorsChecked} аккаунтов проверено · ${result.posts.length} постов в выбранной базе`);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -124,7 +152,7 @@ export function InstagramRadarPanel({ onClose }: InstagramRadarPanelProps) {
           <div>
             <h2 className="font-sans text-lg font-semibold text-white">Instagram Radar</h2>
             <p className="text-xs text-white/40">
-              Конкуренты → свежие посты → score → выбор для ремикса.
+              База аккаунтов → свежие посты и Reels → score → выбор материала.
             </p>
           </div>
           <button
@@ -140,10 +168,29 @@ export function InstagramRadarPanel({ onClose }: InstagramRadarPanelProps) {
         <div className="min-h-0 flex-1 overflow-y-auto p-4 md:p-6">
           <div className="grid gap-4 lg:grid-cols-[360px_1fr]">
             <section className="rounded-2xl border border-white/8 bg-white/[0.03] p-4">
-              <h3 className="text-sm font-semibold text-white">Конкуренты</h3>
+              <h3 className="text-sm font-semibold text-white">База аккаунтов</h3>
               <p className="mt-1 text-xs text-white/40">
-                Вставь ссылки на профили Instagram, по одной в строке. Посты и reels сюда не подходят.
+                Выбери аудиторию. Каждая база сохраняется отдельно и остаётся редактируемой.
               </p>
+
+              <div className="mt-3 grid gap-2">
+                {AUDIENCE_OPTIONS.map((option) => (
+                  <button
+                    key={option.id}
+                    type="button"
+                    onClick={() => setAudience(option.id)}
+                    className={
+                      audience === option.id
+                        ? "flex items-center justify-between rounded-lg border border-cyan-400/40 bg-cyan-400/15 px-3 py-2 text-left text-xs font-medium text-cyan-100"
+                        : "flex items-center justify-between rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-left text-xs text-white/55 transition hover:text-white"
+                    }
+                  >
+                    <span>{option.label}</span>
+                    <span>{accountBases[option.id].length}</span>
+                  </button>
+                ))}
+              </div>
+
               <textarea
                 value={urlsText}
                 onChange={(event) => setUrlsText(event.target.value)}
@@ -157,7 +204,7 @@ export function InstagramRadarPanel({ onClose }: InstagramRadarPanelProps) {
                 className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl border border-cyan-400/25 bg-cyan-400/10 px-3 py-2 text-sm font-medium text-cyan-100 transition hover:border-cyan-300/45 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                Сохранить конкурентов
+                Сохранить выбранную базу
               </button>
 
               <div className="mt-5 rounded-xl border border-white/8 bg-black/20 p-3">
@@ -181,21 +228,23 @@ export function InstagramRadarPanel({ onClose }: InstagramRadarPanelProps) {
                 <button
                   type="button"
                   onClick={handleSync}
-                  disabled={syncing || competitors.length === 0}
+                  disabled={syncing || selectedUrls.length === 0}
                   className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.05] px-3 py-2 text-sm font-medium text-white transition hover:border-cyan-300/35 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {syncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                  Обновить посты
+                  Обновить выбранную базу
                 </button>
                 {lastSync ? <p className="mt-2 text-xs text-emerald-300/80">{lastSync}</p> : null}
               </div>
 
               <div className="mt-5 space-y-2">
-                <p className="text-xs font-medium text-white/60">Сохранено: {competitors.length}</p>
-                {competitors.map((competitor) => (
-                  <div key={competitor.id} className="rounded-xl border border-white/8 bg-white/[0.03] px-3 py-2">
-                    <p className="text-sm font-medium text-white">@{competitor.username}</p>
-                    <p className="truncate text-xs text-white/35">{competitor.url}</p>
+                <p className="text-xs font-medium text-white/60">
+                  В выбранной базе: {selectedUrls.length} · всего: {totalAccounts}
+                </p>
+                {selectedUrls.map((url) => (
+                  <div key={url} className="rounded-xl border border-white/8 bg-white/[0.03] px-3 py-2">
+                    <p className="text-sm font-medium text-white">@{usernameFromUrl(url)}</p>
+                    <p className="truncate text-xs text-white/35">{url}</p>
                   </div>
                 ))}
               </div>
@@ -229,7 +278,7 @@ export function InstagramRadarPanel({ onClose }: InstagramRadarPanelProps) {
 
               {!loading && sortedPosts.length === 0 ? (
                 <div className="mt-8 rounded-xl border border-white/8 bg-black/20 p-4 text-sm text-white/45">
-                  Постов пока нет. Сохрани конкурентов и нажми “Обновить посты”.
+                  Постов пока нет. Выбери базу и нажми “Обновить выбранную базу”.
                 </div>
               ) : null}
 
