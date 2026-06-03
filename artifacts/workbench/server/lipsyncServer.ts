@@ -6,18 +6,23 @@ import {
   deleteLipsyncJob,
   lipsyncRuntimeConfig,
   markLipsyncJobReady,
-  readLipsyncJob,
   readLipsyncJobs,
   refreshLipsyncJob,
   renderLipsyncJob,
   uploadLipsyncAudio,
 } from "./lipsync";
+import { analyzeSourceVideoSkeleton } from "./videoSkeleton";
 
 const PORT = Number(process.env.LIPSYNC_API_PORT) || 8791;
 
 const audioUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 50 * 1024 * 1024, files: 1 },
+});
+
+const sourceVideoUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 100 * 1024 * 1024, files: 1 },
 });
 
 const app = express();
@@ -32,8 +37,19 @@ app.get("/wb/lipsync/health", (_req, res) => {
     endpoint: lipsyncRuntimeConfig.endpoint,
     modelId: lipsyncRuntimeConfig.modelId,
     falKeyConfigured: Boolean(process.env.FAL_KEY?.trim()),
+    openRouterConfigured: Boolean(process.env.OPENROUTER_API_KEY?.trim()),
     resolutions: lipsyncRuntimeConfig.resolutions,
   });
+});
+
+app.post("/wb/lipsync/analyze-source-video", sourceVideoUpload.single("video"), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: "source video file is required" });
+    const script = typeof req.body.script === "string" ? req.body.script : "";
+    return res.json(await analyzeSourceVideoSkeleton(req.file, script));
+  } catch (error) {
+    return res.status(502).json({ error: error instanceof Error ? error.message : String(error) });
+  }
 });
 
 app.post("/wb/lipsync/upload-audio", audioUpload.single("audio"), async (req, res) => {
