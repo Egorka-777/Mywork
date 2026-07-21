@@ -33,6 +33,19 @@ import {
   extractSourceFromUpload,
   rewriteSourceRequest,
 } from "./sourceRewriter";
+import {
+  buildDraftDeepLink,
+  getTaskRadarHealth,
+  listTaskRadarItems,
+  patchTaskRadarItem,
+  readTaskRadarSettings,
+  renderReplyTemplate,
+  replyTaskRadarItem,
+  runTaskRadarSearch,
+  saveTaskRadarSettings,
+  DEFAULT_REPLY_TEMPLATE,
+} from "./taskRadar";
+import { diagnoseWebActor } from "./taskRadarWeb";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..", "..", "..");
@@ -1324,6 +1337,127 @@ app.post("/wb/workflows/:id/start", async (req, res) => {
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     return res.status(500).json({ error: message });
+  }
+});
+
+// ─── Task Radar ───────────────────────────────────────────────────────────────
+
+app.get("/wb/task-radar/health", async (_req, res) => {
+  try {
+    res.json(await getTaskRadarHealth());
+  } catch (e) {
+    res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
+app.get("/wb/task-radar/diagnose-web", async (_req, res) => {
+  try {
+    res.json(await diagnoseWebActor());
+  } catch (e) {
+    res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
+app.get("/wb/task-radar/settings", async (_req, res) => {
+  try {
+    res.json({
+      settings: await readTaskRadarSettings(),
+      defaultReplyTemplate: DEFAULT_REPLY_TEMPLATE,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
+app.put("/wb/task-radar/settings", async (req, res) => {
+  try {
+    const body = (req.body || {}) as Record<string, unknown>;
+    const settings = await saveTaskRadarSettings(body);
+    res.json({ settings });
+  } catch (e) {
+    res.status(400).json({ error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
+app.post("/wb/task-radar/search", async (req, res) => {
+  try {
+    const body = (req.body || {}) as {
+      sources?: Array<"telegram" | "web">;
+      maxAgeMinutes?: number;
+    };
+    const result = await runTaskRadarSearch(body);
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
+app.get("/wb/task-radar/items", async (req, res) => {
+  try {
+    const source = typeof req.query.source === "string" ? req.query.source : undefined;
+    const status = typeof req.query.status === "string" ? req.query.status : undefined;
+    const query = typeof req.query.query === "string" ? req.query.query : undefined;
+    const limit = req.query.limit ? Number(req.query.limit) : 200;
+    const items = await listTaskRadarItems({ source, status, query, limit });
+    res.json({ items });
+  } catch (e) {
+    res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
+app.patch("/wb/task-radar/items/:id", async (req, res) => {
+  try {
+    const id = String(req.params.id || "");
+    const status = (req.body as { status?: string } | undefined)?.status;
+    if (
+      status !== "new" &&
+      status !== "opened" &&
+      status !== "replied" &&
+      status !== "ignored"
+    ) {
+      return res.status(400).json({ error: "invalid status" });
+    }
+    const item = await patchTaskRadarItem(id, { status });
+    if (!item) return res.status(404).json({ error: "not_found" });
+    return res.json({ item });
+  } catch (e) {
+    return res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
+app.post("/wb/task-radar/items/:id/reply", async (req, res) => {
+  try {
+    const id = String(req.params.id || "");
+    const auto = Boolean((req.body as { auto?: boolean } | undefined)?.auto);
+    const result = await replyTaskRadarItem(id, auto ? "auto" : "mark");
+    if (!result.ok) {
+      return res.status(400).json(result);
+    }
+    const deepLink =
+      result.item && result.draft
+        ? buildDraftDeepLink(result.item, result.draft)
+        : null;
+    return res.json({ ...result, deepLink });
+  } catch (e) {
+    return res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
+app.post("/wb/task-radar/items/:id/draft", async (req, res) => {
+  try {
+    const id = String(req.params.id || "");
+    const settings = await readTaskRadarSettings();
+    const items = await listTaskRadarItems({ limit: 500 });
+    const item = items.find((i) => i.id === id);
+    if (!item) return res.status(404).json({ error: "not_found" });
+    const draft = renderReplyTemplate(settings.replyTemplate, item);
+    const deepLink = buildDraftDeepLink(item, draft);
+    if (item.status === "new") {
+      await patchTaskRadarItem(id, { status: "opened" });
+    }
+    return res.json({ draft, deepLink, item });
+  } catch (e) {
+    return res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
   }
 });
 

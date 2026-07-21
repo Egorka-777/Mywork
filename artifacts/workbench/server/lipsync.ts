@@ -169,7 +169,7 @@ export async function uploadBufferToFalStorage(buffer: Buffer, contentType: stri
   const upload = await fetch(upload_url, {
     method: "PUT",
     headers: { "Content-Type": contentType },
-    body: buffer,
+    body: new Uint8Array(buffer),
   });
   if (!upload.ok) throw new Error(`FAL storage upload failed: ${upload.status}`);
   return file_url;

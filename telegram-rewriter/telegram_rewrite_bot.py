@@ -10,11 +10,13 @@ from dotenv import load_dotenv
 from openai import AsyncOpenAI
 from telethon import TelegramClient
 from telethon.extensions import html as tl_html
-from telethon.sessions import StringSession
 from telethon.tl.types import (
     MessageMediaDocument,
     MessageMediaPhoto,
 )
+
+from task_radar_api import start_task_radar_api
+from telegram_runtime import runtime as telegram_runtime
 
 load_dotenv()
 
@@ -25,12 +27,9 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-TELEGRAM_API_ID = int(os.environ["TELEGRAM_API_ID"])
-TELEGRAM_API_HASH = os.environ["TELEGRAM_API_HASH"]
 GROQ_API_KEY = os.environ["GROQ_API_KEY"]
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 TARGET_CHAT_ID = os.environ["TARGET_CHAT_ID"]
-TELETHON_SESSION_STRING = os.environ.get("TELETHON_SESSION_STRING", "")
 SOURCE_CHANNELS_RAW = os.environ.get(
     "SOURCE_CHANNELS",
     "@kirillbezikov,@ungurenko_adout_digital,@artamonov_proreels,@blogoputiteyhana,@mirneyrosetey,"
@@ -460,24 +459,29 @@ async def poll_loop(client: TelegramClient, state: dict) -> None:
 
 
 async def main() -> None:
-    if not TELETHON_SESSION_STRING:
-        log.error("TELETHON_SESSION_STRING is not set. Run generate_session.py first.")
-        sys.exit(1)
-
-    log.info("Starting Telegram Rewriter Bot...")
+    log.info("Starting Telegram Rewriter Bot + Task Radar API...")
     log.info(f"Channels: {SOURCE_CHANNELS}")
     log.info(f"Target chat ID: {TARGET_CHAT_ID}")
 
     state = load_state()
 
-    client = TelegramClient(StringSession(TELETHON_SESSION_STRING), TELEGRAM_API_ID, TELEGRAM_API_HASH)
-    await client.start()
+    try:
+        client = await telegram_runtime.start()
+    except RuntimeError as exc:
+        log.error("%s", exc)
+        sys.exit(1)
+
     log.info("Telegram connected.")
 
     if is_tracker_enabled(state) and not is_bootstrap_done(state):
         state = await bootstrap(client, state)
 
-    await poll_loop(client, state)
+    runner = await start_task_radar_api(telegram_runtime)
+    try:
+        await poll_loop(client, state)
+    finally:
+        await runner.cleanup()
+        await telegram_runtime.shutdown()
 
 
 if __name__ == "__main__":

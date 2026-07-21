@@ -26,6 +26,9 @@ import { LipsyncPanel } from "./LipsyncPanel";
 import { LipsyncTile } from "./LipsyncTile";
 import { SourceRewriterPanel } from "./SourceRewriterPanel";
 import type { SourceRewriterNextActionPayload } from "./SourceRewriterPipeline";
+import { TaskRadarPanel } from "./TaskRadarPanel";
+import { TaskRadarTile } from "./TaskRadarTile";
+import { fetchTaskRadarHealth } from "./taskRadarApi";
 import { TrackerTile } from "./TrackerTile";
 import { WorkflowLivePanel } from "./WorkflowLivePanel";
 
@@ -42,6 +45,7 @@ export default function App() {
   const [openFreedz, setOpenFreedz] = useState(false);
   const [openCarouselRemix, setOpenCarouselRemix] = useState(false);
   const [openInstagramRadar, setOpenInstagramRadar] = useState(false);
+  const [openTaskRadar, setOpenTaskRadar] = useState(false);
   const [openAssetVault, setOpenAssetVault] = useState(false);
   const [openLipsync, setOpenLipsync] = useState(false);
   const [openSourceRewriter, setOpenSourceRewriter] = useState(false);
@@ -55,6 +59,12 @@ export default function App() {
   const [radarPostsCount, setRadarPostsCount] = useState(0);
   const [radarLoading, setRadarLoading] = useState(false);
   const [radarError, setRadarError] = useState<string | null>(null);
+  const [taskRadarNewCount, setTaskRadarNewCount] = useState(0);
+  const [taskRadarLastRunAt, setTaskRadarLastRunAt] = useState<string | null>(null);
+  const [taskRadarTelegramOk, setTaskRadarTelegramOk] = useState<boolean | null>(null);
+  const [taskRadarWebOk, setTaskRadarWebOk] = useState<boolean | null>(null);
+  const [taskRadarLoading, setTaskRadarLoading] = useState(false);
+  const [taskRadarError, setTaskRadarError] = useState<string | null>(null);
   const [facesCount, setFacesCount] = useState(0);
   const [facesLoading, setFacesLoading] = useState(false);
   const [facesError, setFacesError] = useState<string | null>(null);
@@ -184,6 +194,34 @@ export default function App() {
   useEffect(() => {
     let cancelled = false;
 
+    async function loadTaskRadarSummary() {
+      setTaskRadarLoading(true);
+      setTaskRadarError(null);
+      try {
+        const health = await fetchTaskRadarHealth();
+        if (cancelled) return;
+        setTaskRadarNewCount(health.newCount);
+        setTaskRadarLastRunAt(health.lastRun?.at ?? null);
+        setTaskRadarTelegramOk(health.telegram.connected);
+        setTaskRadarWebOk(health.apify.suitableForWebSearch);
+      } catch (error) {
+        if (cancelled) return;
+        setTaskRadarError(error instanceof Error ? error.message : "Failed to load Task Radar");
+      } finally {
+        if (!cancelled) setTaskRadarLoading(false);
+      }
+    }
+
+    void loadTaskRadarSummary();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
     async function loadAgentsHubSummary() {
       setBrainLoading(true);
       setBrainError(null);
@@ -284,6 +322,15 @@ export default function App() {
             error={radarError}
             onOpen={() => setOpenInstagramRadar(true)}
           />
+          <TaskRadarTile
+            newCount={taskRadarNewCount}
+            lastRunAt={taskRadarLastRunAt}
+            telegramOk={taskRadarTelegramOk}
+            webOk={taskRadarWebOk}
+            loading={taskRadarLoading}
+            error={taskRadarError}
+            onOpen={() => setOpenTaskRadar(true)}
+          />
           <AssetVaultTile
             facesCount={facesCount}
             loading={facesLoading}
@@ -317,6 +364,18 @@ export default function App() {
       )}
       {openInstagramRadar && (
         <InstagramRadarPanel onClose={() => setOpenInstagramRadar(false)} />
+      )}
+      {openTaskRadar && (
+        <TaskRadarPanel
+          onClose={() => setOpenTaskRadar(false)}
+          onSummaryChanged={(summary) => {
+            setTaskRadarNewCount(summary.newCount);
+            setTaskRadarLastRunAt(summary.lastRunAt);
+            setTaskRadarTelegramOk(summary.telegramOk);
+            setTaskRadarWebOk(summary.webOk);
+            setTaskRadarError(null);
+          }}
+        />
       )}
       {openAssetVault && (
         <AssetVaultPanel

@@ -231,11 +231,12 @@ export function AgentsHubPanel({ onClose }: AgentsHubPanelProps) {
 
   useEffect(() => {
     if (!pollingId) return;
+    const workflowId = pollingId;
     let cancelled = false;
     let timer: number | undefined;
     async function poll() {
       try {
-        const latest = await fetchWorkflow(pollingId);
+        const latest = await fetchWorkflow(workflowId);
         if (cancelled) return;
         setWorkflow(latest);
         if (latest.status === "running" || latest.status === "reviewing" || latest.status === "revision_required" || latest.status === "planned") {

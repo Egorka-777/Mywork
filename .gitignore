@@ -62,7 +62,15 @@ artifacts/workbench/data/instagram-radar/competitors.json
 artifacts/workbench/data/instagram-radar/posts-cache.json
 artifacts/workbench/data/instagram-radar/sync-log.jsonl
 
+artifacts/workbench/data/task-radar/settings.json
+artifacts/workbench/data/task-radar/items.json
+artifacts/workbench/data/task-radar/runs.jsonl
+artifacts/workbench/data/task-radar/replies.jsonl
+
 # Workbench Asset Vault runtime files
 artifacts/workbench/data/assets/faces.json
 artifacts/workbench/data/assets/faces/*
 !artifacts/workbench/data/assets/faces/.gitkeep
+
+__pycache__/
+*.py[cod]
