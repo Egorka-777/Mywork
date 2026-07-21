@@ -16,6 +16,11 @@ export type TaskRadarSettings = {
   excludeKeywords: string[];
   maxAgeMinutes: number;
   telegramEnabled: boolean;
+  telegramPublicPostsEnabled: boolean;
+  telegramPublicGroupsEnabled: boolean;
+  telegramMySourcesEnabled: boolean;
+  telegramSources: TaskRadarTelegramSource[];
+  allowPaidStarsSearch: boolean;
   webEnabled: boolean;
   replyMode: ReplyMode;
   replyTemplate: string;
@@ -27,9 +32,16 @@ export type TaskRadarSettings = {
   autoDisabledReason: string | null;
 };
 
+export type TaskRadarTelegramSource = {
+  id: string;
+  username: string;
+  active: boolean;
+};
+
 export type TaskRadarItem = {
   id: string;
   source: TaskRadarSource;
+  telegramMode?: "public_posts" | "public_groups" | "my_sources";
   externalId: string | null;
   fingerprint: string;
   text: string;
@@ -109,6 +121,11 @@ function defaultSettings(): TaskRadarSettings {
     excludeKeywords: [...DEFAULT_EXCLUDE],
     maxAgeMinutes: 180,
     telegramEnabled: true,
+    telegramPublicPostsEnabled: true,
+    telegramPublicGroupsEnabled: false,
+    telegramMySourcesEnabled: false,
+    telegramSources: [],
+    allowPaidStarsSearch: false,
     webEnabled: true,
     replyMode: "draft",
     replyTemplate: DEFAULT_REPLY_TEMPLATE,
@@ -119,6 +136,25 @@ function defaultSettings(): TaskRadarSettings {
     autoLiveConfirmed: false,
     autoDisabledReason: null,
   };
+}
+
+function normalizeTelegramSources(input: unknown): TaskRadarTelegramSource[] {
+  if (!Array.isArray(input)) return [];
+  const out: TaskRadarTelegramSource[] = [];
+  for (const row of input) {
+    if (!row || typeof row !== "object") continue;
+    const rec = row as Record<string, unknown>;
+    const username = String(rec.username || "")
+      .trim()
+      .replace(/^@/, "");
+    if (!username) continue;
+    out.push({
+      id: String(rec.id || randomUUID()),
+      username,
+      active: rec.active !== false,
+    });
+  }
+  return out;
 }
 
 async function ensureDir() {
@@ -183,6 +219,15 @@ export async function saveTaskRadarSettings(
       ? patch.excludeKeywords.map(String)
       : current.excludeKeywords,
     webDomains: Array.isArray(patch.webDomains) ? patch.webDomains.map(String) : current.webDomains,
+    telegramSources:
+      patch.telegramSources !== undefined
+        ? normalizeTelegramSources(patch.telegramSources)
+        : current.telegramSources,
+    allowPaidStarsSearch: Boolean(
+      patch.allowPaidStarsSearch !== undefined
+        ? patch.allowPaidStarsSearch
+        : current.allowPaidStarsSearch
+    ),
   };
 
   if (patch.replyMode === "auto" && next.autoEnvironment === "live" && !next.autoLiveConfirmed) {
@@ -418,7 +463,11 @@ export async function runTaskRadarSearch(input?: {
   const settings = await readTaskRadarSettings();
   const maxAgeMinutes = input?.maxAgeMinutes ?? settings.maxAgeMinutes;
   const wantTelegram =
-    (input?.sources ? input.sources.includes("telegram") : true) && settings.telegramEnabled;
+    (input?.sources ? input.sources.includes("telegram") : true) &&
+    settings.telegramEnabled &&
+    (settings.telegramPublicPostsEnabled ||
+      settings.telegramPublicGroupsEnabled ||
+      settings.telegramMySourcesEnabled);
   const wantWeb = (input?.sources ? input.sources.includes("web") : true) && settings.webEnabled;
 
   const warnings: string[] = [];
@@ -442,6 +491,11 @@ export async function runTaskRadarSearch(input?: {
           excludeKeywords: settings.excludeKeywords,
           maxAgeMinutes,
           limitPerKeyword: 30,
+          telegramPublicPostsEnabled: settings.telegramPublicPostsEnabled,
+          telegramPublicGroupsEnabled: settings.telegramPublicGroupsEnabled,
+          telegramMySourcesEnabled: settings.telegramMySourcesEnabled,
+          telegramSources: settings.telegramSources,
+          allowPaidStarsSearch: settings.allowPaidStarsSearch === true,
         }),
         signal: AbortSignal.timeout(120_000),
       });
@@ -462,6 +516,7 @@ export async function runTaskRadarSearch(input?: {
         for (const row of data.items || []) {
           incoming.push({
             source: "telegram",
+            telegramMode: (row.telegramMode as TaskRadarItem["telegramMode"]) || undefined,
             externalId: (row.externalId as string | null) ?? null,
             fingerprint: String(row.fingerprint || `telegram:${row.externalId || randomUUID()}`),
             text: String(row.text || ""),

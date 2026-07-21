@@ -56,6 +56,30 @@ function linesToList(value: string): string[] {
     .filter(Boolean);
 }
 
+function parseSourcesText(value: string): Array<{ id: string; username: string; active: boolean }> {
+  return value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const inactive = line.startsWith("#");
+      const username = line.replace(/^#/, "").trim().replace(/^@/, "");
+      return {
+        id: username.toLowerCase(),
+        username,
+        active: !inactive && Boolean(username),
+      };
+    })
+    .filter((s) => s.username);
+}
+
+function modeLabel(mode?: string): string {
+  if (mode === "public_posts") return "публичные посты";
+  if (mode === "public_groups") return "публичные группы";
+  if (mode === "my_sources") return "мои источники";
+  return "telegram";
+}
+
 export function TaskRadarPanel({ onClose, onSummaryChanged }: TaskRadarPanelProps) {
   const [settings, setSettings] = useState<TaskRadarSettings | null>(null);
   const [defaultTemplate, setDefaultTemplate] = useState("");
@@ -64,6 +88,7 @@ export function TaskRadarPanel({ onClose, onSummaryChanged }: TaskRadarPanelProp
   const [keywordsText, setKeywordsText] = useState("");
   const [excludeText, setExcludeText] = useState("");
   const [domainsText, setDomainsText] = useState("");
+  const [sourcesText, setSourcesText] = useState("");
   const [template, setTemplate] = useState("");
   const [loading, setLoading] = useState(true);
   const [searching, setSearching] = useState(false);
@@ -89,6 +114,11 @@ export function TaskRadarPanel({ onClose, onSummaryChanged }: TaskRadarPanelProp
     setKeywordsText(settingsRes.settings.keywords.join("\n"));
     setExcludeText(settingsRes.settings.excludeKeywords.join("\n"));
     setDomainsText(settingsRes.settings.webDomains.join("\n"));
+    setSourcesText(
+      (settingsRes.settings.telegramSources || [])
+        .map((s) => `${s.active === false ? "#" : ""}${s.username}`)
+        .join("\n")
+    );
     setTemplate(settingsRes.settings.replyTemplate);
     setHealth(healthRes);
     setItems(itemsRes);
@@ -129,6 +159,11 @@ export function TaskRadarPanel({ onClose, onSummaryChanged }: TaskRadarPanelProp
       setKeywordsText(next.keywords.join("\n"));
       setExcludeText(next.excludeKeywords.join("\n"));
       setDomainsText(next.webDomains.join("\n"));
+      setSourcesText(
+        (next.telegramSources || [])
+          .map((s) => `${s.active === false ? "#" : ""}${s.username}`)
+          .join("\n")
+      );
       setTemplate(next.replyTemplate);
       const healthRes = await fetchTaskRadarHealth();
       setHealth(healthRes);
@@ -149,9 +184,13 @@ export function TaskRadarPanel({ onClose, onSummaryChanged }: TaskRadarPanelProp
         keywords: linesToList(keywordsText),
         excludeKeywords: linesToList(excludeText),
         webDomains: linesToList(domainsText),
+        telegramSources: parseSourcesText(sourcesText),
         replyTemplate: template,
         maxAgeMinutes: settings.maxAgeMinutes,
         telegramEnabled: settings.telegramEnabled,
+        telegramPublicPostsEnabled: settings.telegramPublicPostsEnabled,
+        telegramPublicGroupsEnabled: settings.telegramPublicGroupsEnabled,
+        telegramMySourcesEnabled: settings.telegramMySourcesEnabled,
         webEnabled: settings.webEnabled,
       });
       const sources: Array<"telegram" | "web"> = [];
@@ -287,6 +326,54 @@ export function TaskRadarPanel({ onClose, onSummaryChanged }: TaskRadarPanelProp
               </button>
               <button
                 type="button"
+                disabled={!settings.telegramEnabled}
+                onClick={() =>
+                  void persistSettings({
+                    telegramPublicPostsEnabled: !settings.telegramPublicPostsEnabled,
+                  })
+                }
+                className={`rounded-full border px-2.5 py-1 ${
+                  settings.telegramEnabled && settings.telegramPublicPostsEnabled
+                    ? "border-amber-400/30 bg-amber-400/10 text-amber-100"
+                    : "border-white/10 text-white/40"
+                }`}
+              >
+                Все публичные посты
+              </button>
+              <button
+                type="button"
+                disabled={!settings.telegramEnabled}
+                onClick={() =>
+                  void persistSettings({
+                    telegramPublicGroupsEnabled: !settings.telegramPublicGroupsEnabled,
+                  })
+                }
+                className={`rounded-full border px-2.5 py-1 ${
+                  settings.telegramEnabled && settings.telegramPublicGroupsEnabled
+                    ? "border-amber-400/30 bg-amber-400/10 text-amber-100"
+                    : "border-white/10 text-white/40"
+                }`}
+              >
+                Публичные группы
+              </button>
+              <button
+                type="button"
+                disabled={!settings.telegramEnabled}
+                onClick={() =>
+                  void persistSettings({
+                    telegramMySourcesEnabled: !settings.telegramMySourcesEnabled,
+                  })
+                }
+                className={`rounded-full border px-2.5 py-1 ${
+                  settings.telegramEnabled && settings.telegramMySourcesEnabled
+                    ? "border-amber-400/30 bg-amber-400/10 text-amber-100"
+                    : "border-white/10 text-white/40"
+                }`}
+              >
+                Мои источники
+              </button>
+              <button
+                type="button"
                 onClick={() => void persistSettings({ webEnabled: !settings.webEnabled })}
                 className={`rounded-full border px-2.5 py-1 ${
                   settings.webEnabled
@@ -301,6 +388,12 @@ export function TaskRadarPanel({ onClose, onSummaryChanged }: TaskRadarPanelProp
                 title="Подключим после восстановления VK API"
               >
                 VK позже
+              </span>
+              <span
+                className="rounded-full border border-white/10 px-2.5 py-1 text-white/30"
+                title="Личные диалоги никогда не попадают в выдачу"
+              >
+                Личные диалоги OFF
               </span>
             </div>
           </div>
@@ -335,6 +428,19 @@ export function TaskRadarPanel({ onClose, onSummaryChanged }: TaskRadarPanelProp
                 ))}
               </div>
             </div>
+
+            <label className="block">
+              <span className="mb-1 block text-xs text-white/40">
+                Мои источники (username, # = выкл)
+              </span>
+              <textarea
+                value={sourcesText}
+                onChange={(e) => setSourcesText(e.target.value)}
+                rows={4}
+                placeholder={"freelancers_chat\n#old_channel"}
+                className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-white outline-none focus:border-amber-400/40"
+              />
+            </label>
 
             <label className="block">
               <span className="mb-1 block text-xs text-white/40">Ключи включения</span>
@@ -434,6 +540,7 @@ export function TaskRadarPanel({ onClose, onSummaryChanged }: TaskRadarPanelProp
                     keywords: linesToList(keywordsText),
                     excludeKeywords: linesToList(excludeText),
                     webDomains: linesToList(domainsText),
+                    telegramSources: parseSourcesText(sourcesText),
                     replyTemplate: template,
                   })
                 }
@@ -491,7 +598,7 @@ export function TaskRadarPanel({ onClose, onSummaryChanged }: TaskRadarPanelProp
                 >
                   <div className="flex flex-wrap items-center gap-2 text-xs text-white/45">
                     <span className="rounded-md border border-white/10 px-1.5 py-0.5 uppercase text-white/70">
-                      {item.source}
+                      {item.source === "telegram" ? modeLabel(item.telegramMode) : item.source}
                     </span>
                     <span>
                       {item.dateUnknown

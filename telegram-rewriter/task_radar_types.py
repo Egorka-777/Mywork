@@ -8,6 +8,7 @@ ReplyMode = Literal["off", "draft", "auto"]
 AutoEnvironment = Literal["test", "live"]
 ItemStatus = Literal["new", "opened", "replied", "ignored"]
 ItemSource = Literal["telegram", "web"]
+TelegramSearchMode = Literal["public_posts", "public_groups", "my_sources"]
 
 DEFAULT_REPLY_TEMPLATE = (
     "Здравствуйте. Увидел ваш свежий пост по задаче. "
@@ -56,6 +57,11 @@ class TaskRadarSettings(TypedDict, total=False):
     excludeKeywords: list[str]
     maxAgeMinutes: int
     telegramEnabled: bool
+    telegramPublicPostsEnabled: bool
+    telegramPublicGroupsEnabled: bool
+    telegramMySourcesEnabled: bool
+    telegramSources: list[dict[str, Any]]
+    allowPaidStarsSearch: bool
     webEnabled: bool
     replyMode: ReplyMode
     replyTemplate: str
@@ -73,6 +79,11 @@ def default_settings() -> dict[str, Any]:
         "excludeKeywords": list(DEFAULT_EXCLUDE_KEYWORDS),
         "maxAgeMinutes": 180,
         "telegramEnabled": True,
+        "telegramPublicPostsEnabled": True,
+        "telegramPublicGroupsEnabled": False,
+        "telegramMySourcesEnabled": False,
+        "telegramSources": [],
+        "allowPaidStarsSearch": False,
         "webEnabled": True,
         "replyMode": "draft",
         "replyTemplate": DEFAULT_REPLY_TEMPLATE,

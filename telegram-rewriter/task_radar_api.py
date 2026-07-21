@@ -13,8 +13,22 @@ from typing import Any
 
 from aiohttp import web
 from telethon.errors import FloodWaitError
+from telethon.tl.functions.channels import CheckSearchPostsFloodRequest, SearchPostsRequest
 from telethon.tl.functions.messages import SearchGlobalRequest
-from telethon.tl.types import InputMessagesFilterEmpty, InputPeerEmpty
+from telethon.tl.types import (
+    Channel,
+    Chat,
+    InputMessagesFilterEmpty,
+    InputPeerChannel,
+    InputPeerChat,
+    InputPeerEmpty,
+    InputPeerUser,
+    Message,
+    PeerChannel,
+    PeerChat,
+    PeerUser,
+    User,
+)
 
 from task_radar_store import (
     append_jsonl,
@@ -30,6 +44,8 @@ from telegram_runtime import TelegramRuntime
 log = logging.getLogger(__name__)
 
 SEARCH_PAUSE_SEC = float(os.environ.get("TASK_RADAR_SEARCH_PAUSE_SEC", "1.2"))
+PUBLIC_POSTS_PAGE_LIMIT = 40
+PUBLIC_POSTS_MAX_PAGES = 8
 PEER_COOLDOWN_DAYS = 7
 MIN_AUTO_GAP_SEC = 90
 
@@ -67,30 +83,57 @@ def _build_telegram_url(username: str | None, message_id: int | None) -> str | N
     return f"https://t.me/{clean}/{message_id}"
 
 
-async def _resolve_chat_meta(client: Any, message: Any) -> dict[str, Any]:
-    chat = getattr(message, "chat", None)
-    peer_id = getattr(message, "peer_id", None)
-    chat_id: int | None = None
-    title: str | None = None
-    username: str | None = None
-
-    if chat is not None:
+def _index_peers(result: Any) -> tuple[dict[int, Any], dict[int, Any]]:
+    chats: dict[int, Any] = {}
+    users: dict[int, Any] = {}
+    for chat in getattr(result, "chats", None) or []:
         chat_id = getattr(chat, "id", None)
-        title = getattr(chat, "title", None) or getattr(chat, "first_name", None)
-        username = getattr(chat, "username", None)
-    elif peer_id is not None:
-        chat_id = getattr(peer_id, "channel_id", None) or getattr(peer_id, "chat_id", None) or getattr(
-            peer_id, "user_id", None
-        )
+        if chat_id is not None:
+            chats[int(chat_id)] = chat
+    for user in getattr(result, "users", None) or []:
+        user_id = getattr(user, "id", None)
+        if user_id is not None:
+            users[int(user_id)] = user
+    return chats, users
 
-    if (title is None or username is None) and chat_id is not None:
-        try:
-            entity = await client.get_entity(chat_id)
-            title = title or getattr(entity, "title", None) or getattr(entity, "first_name", None)
-            username = username or getattr(entity, "username", None)
-        except Exception:
-            pass
 
+def _entity_from_peer(
+    peer: Any,
+    chats: dict[int, Any],
+    users: dict[int, Any],
+) -> Any | None:
+    if isinstance(peer, PeerChannel):
+        return chats.get(int(peer.channel_id))
+    if isinstance(peer, PeerChat):
+        return chats.get(int(peer.chat_id))
+    if isinstance(peer, PeerUser):
+        return users.get(int(peer.user_id))
+    return None
+
+
+def _is_private_or_bot(entity: Any) -> bool:
+    """Personal dialogs and bots are always excluded."""
+    if isinstance(entity, User):
+        return True
+    return False
+
+
+def _is_broadcast_channel(entity: Any) -> bool:
+    return isinstance(entity, Channel) and bool(getattr(entity, "broadcast", False))
+
+
+def _is_group_entity(entity: Any) -> bool:
+    if isinstance(entity, Chat):
+        return True
+    if isinstance(entity, Channel) and bool(getattr(entity, "megagroup", False)):
+        return True
+    return False
+
+
+def _entity_meta(entity: Any) -> dict[str, Any]:
+    chat_id = getattr(entity, "id", None)
+    title = getattr(entity, "title", None) or getattr(entity, "first_name", None)
+    username = getattr(entity, "username", None)
     return {
         "chatId": str(chat_id) if chat_id is not None else None,
         "sourceTitle": title,
@@ -98,64 +141,320 @@ async def _resolve_chat_meta(client: Any, message: Any) -> dict[str, Any]:
     }
 
 
-async def _resolve_sender_meta(client: Any, message: Any) -> dict[str, Any]:
+def _input_peer_for_message(message: Message, chats: dict[int, Any]) -> Any:
+    peer = message.peer_id
+    if isinstance(peer, PeerChannel):
+        channel = chats.get(int(peer.channel_id))
+        access_hash = getattr(channel, "access_hash", 0) if channel is not None else 0
+        return InputPeerChannel(channel_id=int(peer.channel_id), access_hash=int(access_hash or 0))
+    if isinstance(peer, PeerChat):
+        return InputPeerChat(chat_id=int(peer.chat_id))
+    if isinstance(peer, PeerUser):
+        return InputPeerUser(user_id=int(peer.user_id), access_hash=0)
+    return InputPeerEmpty()
+
+
+def _sender_meta_from_message(message: Message, users: dict[int, Any]) -> dict[str, Any]:
     sender_id = getattr(message, "sender_id", None)
     sender_username: str | None = None
-    sender = getattr(message, "sender", None)
-    if sender is not None:
-        sender_username = getattr(sender, "username", None)
-        if sender_id is None:
-            sender_id = getattr(sender, "id", None)
-    if sender_username is None and sender_id is not None:
-        try:
-            entity = await client.get_entity(sender_id)
-            sender_username = getattr(entity, "username", None)
-        except Exception:
-            pass
+    if sender_id is not None and int(sender_id) in users:
+        user = users[int(sender_id)]
+        if isinstance(user, User) and not bool(getattr(user, "bot", False)):
+            sender_username = getattr(user, "username", None)
     return {
         "senderId": str(sender_id) if sender_id is not None else None,
-        "senderUsername": sender_username.lstrip("@") if isinstance(sender_username, str) and sender_username else None,
+        "senderUsername": sender_username.lstrip("@")
+        if isinstance(sender_username, str) and sender_username
+        else None,
     }
 
 
-async def search_telegram(
-    runtime: TelegramRuntime,
+def _empty_stats() -> dict[str, int]:
+    return {
+        "keywordsChecked": 0,
+        "rawFound": 0,
+        "kept": 0,
+        "duplicates": 0,
+        "excluded": 0,
+        "skippedPrivate": 0,
+        "skippedOld": 0,
+    }
+
+
+class _SearchAccumulator:
+    def __init__(self) -> None:
+        self.items: list[dict[str, Any]] = []
+        self.seen: set[str] = set()
+        self.warnings: list[str] = []
+        self.stats = _empty_stats()
+
+    def add_message(
+        self,
+        *,
+        message: Message,
+        entity: Any,
+        users: dict[int, Any],
+        keyword: str,
+        mode: str,
+        min_date: datetime,
+        exclude_keywords: list[str],
+        require_public_username: bool = False,
+    ) -> str:
+        """Returns kept|duplicate|excluded|private|old|empty."""
+        self.stats["rawFound"] += 1
+        if not isinstance(message, Message):
+            return "empty"
+        if _is_private_or_bot(entity):
+            self.stats["skippedPrivate"] += 1
+            return "private"
+
+        text = getattr(message, "message", None) or ""
+        if not isinstance(text, str) or not text.strip():
+            return "empty"
+
+        published = _to_aware(getattr(message, "date", None))
+        if published is None or published < min_date:
+            self.stats["skippedOld"] += 1
+            return "old"
+
+        if _contains_any(_normalize_text(text), exclude_keywords):
+            self.stats["excluded"] += 1
+            return "excluded"
+
+        meta = _entity_meta(entity)
+        if require_public_username and not meta.get("sourceUsername"):
+            self.stats["skippedPrivate"] += 1
+            return "private"
+
+        sender = _sender_meta_from_message(message, users)
+        message_id = getattr(message, "id", None)
+        external_id = (
+            f"{meta['chatId']}:{message_id}"
+            if meta.get("chatId") is not None and message_id is not None
+            else None
+        )
+        url = _build_telegram_url(meta.get("sourceUsername"), message_id)
+        fingerprint = (
+            f"telegram:{external_id}"
+            if external_id
+            else (
+                f"telegram:{url}"
+                if url
+                else f"telegram:{_normalize_text(text)}:{published.isoformat()}"
+            )
+        )
+        if fingerprint in self.seen:
+            self.stats["duplicates"] += 1
+            return "duplicate"
+        self.seen.add(fingerprint)
+
+        self.items.append(
+            {
+                "id": str(uuid.uuid4()),
+                "source": "telegram",
+                "telegramMode": mode,
+                "externalId": external_id,
+                "fingerprint": fingerprint,
+                "text": text.strip(),
+                "publishedAt": published.isoformat(),
+                "foundAt": _now_iso(),
+                "dateUnknown": False,
+                "chatId": meta.get("chatId"),
+                "sourceTitle": meta.get("sourceTitle"),
+                "sourceUsername": meta.get("sourceUsername"),
+                "senderId": sender.get("senderId"),
+                "senderUsername": sender.get("senderUsername"),
+                "url": url,
+                "matchedKeyword": keyword,
+                "status": "new",
+            }
+        )
+        self.stats["kept"] += 1
+        return "kept"
+
+    def sorted_items(self) -> list[dict[str, Any]]:
+        return sorted(
+            self.items,
+            key=lambda item: item.get("publishedAt") or "",
+            reverse=True,
+        )
+
+
+async def _search_public_posts(
+    client: Any,
     *,
     keywords: list[str],
     exclude_keywords: list[str],
-    max_age_minutes: int,
+    min_date: datetime,
     limit_per_keyword: int,
-) -> dict[str, Any]:
-    if not runtime.is_connected():
-        return {
-            "ok": False,
-            "items": [],
-            "stats": {
-                "keywordsChecked": 0,
-                "rawFound": 0,
-                "kept": 0,
-                "duplicates": 0,
-                "excluded": 0,
-            },
-            "warnings": ["Telegram is not connected"],
-            "error": "telegram_disconnected",
-        }
+    allow_paid_stars: bool,
+    acc: _SearchAccumulator,
+) -> None:
+    for index, keyword in enumerate(keywords):
+        acc.stats["keywordsChecked"] += 1
+        try:
+            flood = await client(CheckSearchPostsFloodRequest(query=keyword))
+        except FloodWaitError as exc:
+            acc.warnings.append(f"FLOOD_WAIT {exc.seconds}s (public posts / «{keyword}»)")
+            settings = load_settings()
+            settings["replyMode"] = "off"
+            settings["autoDisabledReason"] = f"FLOOD_WAIT {exc.seconds}s"
+            save_settings(settings)
+            return
+        except Exception as exc:
+            acc.warnings.append(f"Проверка квоты SearchPosts не удалась для «{keyword}»: {exc}")
+            continue
 
-    client = runtime.client
-    now = datetime.now(timezone.utc)
-    min_date = now - timedelta(minutes=max(1, int(max_age_minutes)))
-    warnings: list[str] = []
-    raw_found = 0
-    kept = 0
-    duplicates = 0
-    excluded = 0
-    seen: set[str] = set()
-    items: list[dict[str, Any]] = []
+        query_is_free = bool(getattr(flood, "query_is_free", False))
+        remains = int(getattr(flood, "remains", 0) or 0)
+        total_daily = int(getattr(flood, "total_daily", 0) or 0)
+        stars_amount = int(getattr(flood, "stars_amount", 0) or 0)
+        wait_till = getattr(flood, "wait_till", None)
 
-    clean_keywords = [k.strip() for k in keywords if isinstance(k, str) and k.strip()]
-    clean_excludes = [k.strip() for k in exclude_keywords if isinstance(k, str) and k.strip()]
+        paid_stars: int | None = None
+        if query_is_free or remains > 0:
+            paid_stars = None
+        elif allow_paid_stars and stars_amount > 0:
+            paid_stars = stars_amount
+            acc.warnings.append(
+                f"Бесплатная квота исчерпана (0/{total_daily}). "
+                f"Запрос «{keyword}» выполняется с явного разрешения оплаты {stars_amount} Stars."
+            )
+        else:
+            wait_hint = ""
+            if wait_till:
+                try:
+                    wait_hint = (
+                        f" Следующие бесплатные слоты: "
+                        f"{datetime.fromtimestamp(int(wait_till), tz=timezone.utc).isoformat()}"
+                    )
+                except Exception:
+                    wait_hint = f" wait_till={wait_till}"
+            acc.warnings.append(
+                f"Квота бесплатного поиска публичных постов исчерпана "
+                f"(осталось 0/{total_daily}) для «{keyword}».{wait_hint} "
+                f"Оплата Stars не выполняется автоматически."
+            )
+            if index < len(keywords) - 1:
+                await asyncio.sleep(SEARCH_PAUSE_SEC)
+            continue
 
-    for index, keyword in enumerate(clean_keywords):
+        offset_rate = 0
+        offset_peer: Any = InputPeerEmpty()
+        offset_id = 0
+        kept_for_keyword = 0
+        page_limit = max(1, min(int(limit_per_keyword), PUBLIC_POSTS_PAGE_LIMIT))
+
+        for page in range(PUBLIC_POSTS_MAX_PAGES):
+            page_paid: int | None = None
+            if page == 0:
+                page_paid = paid_stars
+            else:
+                try:
+                    page_flood = await client(CheckSearchPostsFloodRequest(query=keyword))
+                except Exception as exc:
+                    acc.warnings.append(f"Квота пагинации SearchPosts «{keyword}»: {exc}")
+                    break
+                page_free = bool(getattr(page_flood, "query_is_free", False))
+                page_remains = int(getattr(page_flood, "remains", 0) or 0)
+                page_stars = int(getattr(page_flood, "stars_amount", 0) or 0)
+                if page_free or page_remains > 0:
+                    page_paid = None
+                elif allow_paid_stars and page_stars > 0:
+                    page_paid = page_stars
+                else:
+                    acc.warnings.append(
+                        f"Пагинация SearchPosts остановлена: нет бесплатной квоты для «{keyword}»"
+                    )
+                    break
+
+            try:
+                result = await client(
+                    SearchPostsRequest(
+                        offset_rate=offset_rate,
+                        offset_peer=offset_peer,
+                        offset_id=offset_id,
+                        limit=page_limit,
+                        query=keyword,
+                        hashtag=None,
+                        allow_paid_stars=page_paid,
+                    )
+                )
+            except FloodWaitError as exc:
+                acc.warnings.append(f"FLOOD_WAIT {exc.seconds}s on SearchPosts «{keyword}»")
+                settings = load_settings()
+                settings["replyMode"] = "off"
+                settings["autoDisabledReason"] = f"FLOOD_WAIT {exc.seconds}s"
+                save_settings(settings)
+                return
+            except Exception as exc:
+                acc.warnings.append(f"SearchPosts failed for «{keyword}»: {exc}")
+                break
+
+            messages = [m for m in (getattr(result, "messages", None) or []) if isinstance(m, Message)]
+            if not messages:
+                break
+
+            chats, users = _index_peers(result)
+            page_dates: list[datetime] = []
+            for message in messages:
+                published = _to_aware(getattr(message, "date", None))
+                if published is not None:
+                    page_dates.append(published)
+                entity = _entity_from_peer(message.peer_id, chats, users)
+                if entity is None:
+                    continue
+                if not _is_broadcast_channel(entity) and not isinstance(entity, Channel):
+                    # SearchPosts should be channels; still drop users/bots.
+                    if _is_private_or_bot(entity):
+                        acc.stats["skippedPrivate"] += 1
+                        continue
+                status = acc.add_message(
+                    message=message,
+                    entity=entity,
+                    users=users,
+                    keyword=keyword,
+                    mode="public_posts",
+                    min_date=min_date,
+                    exclude_keywords=exclude_keywords,
+                    require_public_username=False,
+                )
+                if status == "kept":
+                    kept_for_keyword += 1
+
+            if kept_for_keyword >= limit_per_keyword:
+                break
+            if not page_dates:
+                break
+            oldest = min(page_dates)
+            if oldest < min_date:
+                break
+
+            last = messages[-1]
+            next_rate = getattr(result, "next_rate", None)
+            if next_rate is not None:
+                offset_rate = int(next_rate)
+            elif last.date is not None:
+                offset_rate = int(_to_aware(last.date).timestamp())  # type: ignore[union-attr]
+            offset_id = int(last.id)
+            offset_peer = _input_peer_for_message(last, chats)
+            await asyncio.sleep(SEARCH_PAUSE_SEC)
+
+        if index < len(keywords) - 1:
+            await asyncio.sleep(SEARCH_PAUSE_SEC)
+
+
+async def _search_public_groups(
+    client: Any,
+    *,
+    keywords: list[str],
+    exclude_keywords: list[str],
+    min_date: datetime,
+    limit_per_keyword: int,
+    acc: _SearchAccumulator,
+) -> None:
+    for index, keyword in enumerate(keywords):
+        acc.stats["keywordsChecked"] += 1
         try:
             result = await client(
                 SearchGlobalRequest(
@@ -167,95 +466,210 @@ async def search_telegram(
                     offset_peer=InputPeerEmpty(),
                     offset_id=0,
                     limit=max(1, min(int(limit_per_keyword), 50)),
+                    broadcasts_only=False,
+                    groups_only=True,
+                    users_only=False,
                 )
             )
         except FloodWaitError as exc:
-            warnings.append(f"FLOOD_WAIT {exc.seconds}s on keyword «{keyword}»")
+            acc.warnings.append(f"FLOOD_WAIT {exc.seconds}s on public groups «{keyword}»")
             settings = load_settings()
             settings["replyMode"] = "off"
             settings["autoDisabledReason"] = f"FLOOD_WAIT {exc.seconds}s"
             save_settings(settings)
-            break
+            return
         except Exception as exc:
-            warnings.append(f"Search failed for «{keyword}»: {exc}")
+            acc.warnings.append(f"SearchGlobal groups_only failed for «{keyword}»: {exc}")
             continue
 
-        messages = getattr(result, "messages", None) or []
-        for message in messages:
-            raw_found += 1
-            text = getattr(message, "message", None) or ""
-            if not isinstance(text, str) or not text.strip():
+        chats, users = _index_peers(result)
+        for message in getattr(result, "messages", None) or []:
+            if not isinstance(message, Message):
                 continue
-
-            published = _to_aware(getattr(message, "date", None))
-            if published is None or published < min_date:
+            entity = _entity_from_peer(message.peer_id, chats, users)
+            if entity is None:
                 continue
-
-            normalized = _normalize_text(text)
-            hit_exclude = _contains_any(normalized, clean_excludes)
-            if hit_exclude:
-                excluded += 1
+            if _is_private_or_bot(entity) or not _is_group_entity(entity):
+                acc.stats["skippedPrivate"] += 1
                 continue
-            if keyword.lower() not in normalized:
-                # Global search can be fuzzy; keep only clear keyword hits.
-                excluded += 1
-                continue
-
-            chat_meta = await _resolve_chat_meta(client, message)
-            sender_meta = await _resolve_sender_meta(client, message)
-            message_id = getattr(message, "id", None)
-            external_id = (
-                f"{chat_meta['chatId']}:{message_id}"
-                if chat_meta.get("chatId") is not None and message_id is not None
-                else None
+            acc.add_message(
+                message=message,
+                entity=entity,
+                users=users,
+                keyword=keyword,
+                mode="public_groups",
+                min_date=min_date,
+                exclude_keywords=exclude_keywords,
             )
-            url = _build_telegram_url(chat_meta.get("sourceUsername"), message_id)
-            fingerprint = (
-                f"telegram:{external_id}"
-                if external_id
-                else (f"telegram:{url}" if url else f"telegram:{normalized}:{published.isoformat()}")
-            )
-            if fingerprint in seen:
-                duplicates += 1
-                continue
-            seen.add(fingerprint)
 
-            items.append(
-                {
-                    "id": str(uuid.uuid4()),
-                    "source": "telegram",
-                    "externalId": external_id,
-                    "fingerprint": fingerprint,
-                    "text": text.strip(),
-                    "publishedAt": published.isoformat(),
-                    "foundAt": _now_iso(),
-                    "dateUnknown": False,
-                    "chatId": chat_meta.get("chatId"),
-                    "sourceTitle": chat_meta.get("sourceTitle"),
-                    "sourceUsername": chat_meta.get("sourceUsername"),
-                    "senderId": sender_meta.get("senderId"),
-                    "senderUsername": sender_meta.get("senderUsername"),
-                    "url": url,
-                    "matchedKeyword": keyword,
-                    "status": "new",
-                }
-            )
-            kept += 1
-
-        if index < len(clean_keywords) - 1:
+        if index < len(keywords) - 1:
             await asyncio.sleep(SEARCH_PAUSE_SEC)
 
+
+async def _search_my_sources(
+    client: Any,
+    *,
+    keywords: list[str],
+    exclude_keywords: list[str],
+    min_date: datetime,
+    limit_per_keyword: int,
+    sources: list[dict[str, Any]],
+    acc: _SearchAccumulator,
+) -> None:
+    active_sources = []
+    for row in sources:
+        if not isinstance(row, dict):
+            continue
+        if row.get("active") is False:
+            continue
+        username = str(row.get("username") or "").strip().lstrip("@")
+        if username:
+            active_sources.append(username)
+
+    if not active_sources:
+        acc.warnings.append("Мои источники: список пуст или все выключены")
+        return
+
+    for source in active_sources:
+        try:
+            entity = await client.get_entity(source)
+        except Exception as exc:
+            acc.warnings.append(f"Не удалось открыть источник @{source}: {exc}")
+            continue
+
+        if _is_private_or_bot(entity):
+            acc.warnings.append(f"Источник @{source} пропущен: личный диалог/бот")
+            continue
+
+        for index, keyword in enumerate(keywords):
+            acc.stats["keywordsChecked"] += 1
+            try:
+                messages = await client.get_messages(
+                    entity,
+                    limit=max(1, min(int(limit_per_keyword), 50)),
+                    search=keyword,
+                )
+            except FloodWaitError as exc:
+                acc.warnings.append(f"FLOOD_WAIT {exc.seconds}s on my source @{source}")
+                settings = load_settings()
+                settings["replyMode"] = "off"
+                settings["autoDisabledReason"] = f"FLOOD_WAIT {exc.seconds}s"
+                save_settings(settings)
+                return
+            except Exception as exc:
+                acc.warnings.append(f"Поиск в @{source} / «{keyword}» не удался: {exc}")
+                continue
+
+            users: dict[int, Any] = {}
+            for message in messages or []:
+                if not isinstance(message, Message):
+                    continue
+                published = _to_aware(getattr(message, "date", None))
+                if published is not None and published < min_date:
+                    acc.stats["skippedOld"] += 1
+                    continue
+                acc.add_message(
+                    message=message,
+                    entity=entity,
+                    users=users,
+                    keyword=keyword,
+                    mode="my_sources",
+                    min_date=min_date,
+                    exclude_keywords=exclude_keywords,
+                )
+
+            if index < len(keywords) - 1:
+                await asyncio.sleep(SEARCH_PAUSE_SEC)
+
+        await asyncio.sleep(SEARCH_PAUSE_SEC)
+
+
+async def search_telegram(
+    runtime: TelegramRuntime,
+    *,
+    keywords: list[str],
+    exclude_keywords: list[str],
+    max_age_minutes: int,
+    limit_per_keyword: int,
+    public_posts: bool = True,
+    public_groups: bool = False,
+    my_sources: bool = False,
+    sources: list[dict[str, Any]] | None = None,
+    allow_paid_stars: bool = False,
+) -> dict[str, Any]:
+    if not runtime.is_connected():
+        return {
+            "ok": False,
+            "items": [],
+            "stats": _empty_stats(),
+            "warnings": ["Telegram is not connected"],
+            "error": "telegram_disconnected",
+        }
+
+    if not (public_posts or public_groups or my_sources):
+        return {
+            "ok": False,
+            "items": [],
+            "stats": _empty_stats(),
+            "warnings": ["Не выбран ни один режим Telegram-поиска"],
+            "error": "no_telegram_mode",
+        }
+
+    client = runtime.client
+    min_date = datetime.now(timezone.utc) - timedelta(minutes=max(1, int(max_age_minutes)))
+    clean_keywords = [k.strip() for k in keywords if isinstance(k, str) and k.strip()]
+    clean_excludes = [k.strip() for k in exclude_keywords if isinstance(k, str) and k.strip()]
+    acc = _SearchAccumulator()
+
+    if not clean_keywords:
+        return {
+            "ok": False,
+            "items": [],
+            "stats": _empty_stats(),
+            "warnings": ["Список ключей пуст"],
+            "error": "no_keywords",
+        }
+
+    # Independent modes — never mixed into one SearchGlobal call.
+    if public_posts:
+        await _search_public_posts(
+            client,
+            keywords=clean_keywords,
+            exclude_keywords=clean_excludes,
+            min_date=min_date,
+            limit_per_keyword=limit_per_keyword,
+            allow_paid_stars=bool(allow_paid_stars),
+            acc=acc,
+        )
+    if public_groups:
+        await _search_public_groups(
+            client,
+            keywords=clean_keywords,
+            exclude_keywords=clean_excludes,
+            min_date=min_date,
+            limit_per_keyword=limit_per_keyword,
+            acc=acc,
+        )
+    if my_sources:
+        await _search_my_sources(
+            client,
+            keywords=clean_keywords,
+            exclude_keywords=clean_excludes,
+            min_date=min_date,
+            limit_per_keyword=limit_per_keyword,
+            sources=sources or [],
+            acc=acc,
+        )
+
+    items = acc.sorted_items()
     return {
         "ok": True,
         "items": items,
         "stats": {
-            "keywordsChecked": len(clean_keywords),
-            "rawFound": raw_found,
-            "kept": kept,
-            "duplicates": duplicates,
-            "excluded": excluded,
+            **acc.stats,
+            "kept": len(items),
         },
-        "warnings": warnings,
+        "warnings": acc.warnings,
     }
 
 
@@ -446,12 +860,35 @@ def create_app(runtime: TelegramRuntime) -> web.Application:
         max_age = int(body.get("maxAgeMinutes") or settings.get("maxAgeMinutes") or 180)
         limit = int(body.get("limitPerKeyword") or 30)
 
+        public_posts = body.get("telegramPublicPostsEnabled")
+        if public_posts is None:
+            public_posts = settings.get("telegramPublicPostsEnabled", True)
+        public_groups = body.get("telegramPublicGroupsEnabled")
+        if public_groups is None:
+            public_groups = settings.get("telegramPublicGroupsEnabled", False)
+        my_sources = body.get("telegramMySourcesEnabled")
+        if my_sources is None:
+            my_sources = settings.get("telegramMySourcesEnabled", False)
+
+        sources = body.get("telegramSources")
+        if not isinstance(sources, list):
+            sources = settings.get("telegramSources") or []
+
+        allow_paid = body.get("allowPaidStarsSearch")
+        if allow_paid is None:
+            allow_paid = settings.get("allowPaidStarsSearch", False)
+
         result = await search_telegram(
             runtime,
             keywords=[str(k) for k in keywords],
             exclude_keywords=[str(k) for k in exclude],
             max_age_minutes=max_age,
             limit_per_keyword=limit,
+            public_posts=bool(public_posts),
+            public_groups=bool(public_groups),
+            my_sources=bool(my_sources),
+            sources=[s for s in sources if isinstance(s, dict)],
+            allow_paid_stars=bool(allow_paid),
         )
         return web.json_response(result)
 

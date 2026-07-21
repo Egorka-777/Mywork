@@ -2,12 +2,24 @@ export type ReplyMode = "off" | "draft" | "auto";
 export type AutoEnvironment = "test" | "live";
 export type TaskRadarItemStatus = "new" | "opened" | "replied" | "ignored";
 export type TaskRadarSource = "telegram" | "web";
+export type TelegramSearchMode = "public_posts" | "public_groups" | "my_sources";
+
+export type TaskRadarTelegramSource = {
+  id: string;
+  username: string;
+  active: boolean;
+};
 
 export type TaskRadarSettings = {
   keywords: string[];
   excludeKeywords: string[];
   maxAgeMinutes: number;
   telegramEnabled: boolean;
+  telegramPublicPostsEnabled: boolean;
+  telegramPublicGroupsEnabled: boolean;
+  telegramMySourcesEnabled: boolean;
+  telegramSources: TaskRadarTelegramSource[];
+  allowPaidStarsSearch: boolean;
   webEnabled: boolean;
   replyMode: ReplyMode;
   replyTemplate: string;
@@ -22,6 +34,7 @@ export type TaskRadarSettings = {
 export type TaskRadarItem = {
   id: string;
   source: TaskRadarSource;
+  telegramMode?: TelegramSearchMode;
   externalId: string | null;
   fingerprint: string;
   text: string;
